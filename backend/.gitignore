@@ -1,0 +1,100 @@
+﻿# ============================================================
+# SealScan Backend .gitignore
+# Python / FastAPI / OpenCV / scikit-learn
+# ============================================================
+
+# ------------------------------------------------------------
+# Python
+# ------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+MANIFEST
+wheels/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.env/
+.venvs/
+
+# ------------------------------------------------------------
+# Environment & Secrets
+# ------------------------------------------------------------
+.env
+*.local
+
+# ------------------------------------------------------------
+# ML Models
+# ------------------------------------------------------------
+# Exclude the generated demo model — real models should be
+# stored in a model registry, not committed to git.
+model/tampering_classifier.pkl
+
+# Keep the generator script tracked
+!model/generate_demo_model.py
+
+# ------------------------------------------------------------
+# Pytest / Testing
+# ------------------------------------------------------------
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.cover
+nosetests.xml
+test-results/
+
+# ------------------------------------------------------------
+# IDE & Editor
+# ------------------------------------------------------------
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ------------------------------------------------------------
+# Logs
+# ------------------------------------------------------------
+*.log
+logs/
+
+# ------------------------------------------------------------
+# Temporary / uploaded images (stateless API — nothing persisted)
+# ------------------------------------------------------------
+tmp/
+temp/
+uploads/
+
+# ------------------------------------------------------------
+# mypy / type checking
+# ------------------------------------------------------------
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+
+# ------------------------------------------------------------
+# Ruff / linting caches
+# ------------------------------------------------------------
+.ruff_cache/

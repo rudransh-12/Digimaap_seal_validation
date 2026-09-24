@@ -1,0 +1,98 @@
+﻿"""
+SealScan Backend -- Centralised Configuration
+All tunable parameters live here. Change thresholds / paths in this file only.
+"""
+from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+BASE_DIR = Path(__file__).resolve().parents[3]   # project root (backend/)
+MODEL_DIR = BASE_DIR / "model"
+CLASSIFIER_PATH = MODEL_DIR / "tampering_classifier.pkl"
+
+# ---------------------------------------------------------------------------
+# API / File-upload limits
+# ---------------------------------------------------------------------------
+MAX_IMAGE_SIZE_BYTES: int = 20 * 1024 * 1024          # 20 MB
+ALLOWED_MIME_TYPES: list[str] = [
+    "image/jpeg",
+    "image/png",
+    "image/bmp",
+    "image/tiff",
+    "image/webp",
+]
+ALLOWED_EXTENSIONS: list[str] = [".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"]
+
+# ---------------------------------------------------------------------------
+# Image Quality Thresholds
+# ---------------------------------------------------------------------------
+QUALITY_THRESHOLDS: dict = {
+    # Resolution
+    "min_width": 320,
+    "min_height": 320,
+    # Sharpness -- Laplacian variance (higher = sharper)
+    "min_sharpness": 80.0,
+    # Brightness -- mean greyscale pixel value
+    "min_brightness": 30.0,
+    "max_brightness": 225.0,
+    # Contrast -- std-dev of greyscale values
+    "min_contrast": 20.0,
+    # Noise estimate
+    "max_noise": 15.0,
+}
+
+# ---------------------------------------------------------------------------
+# Preprocessing
+# ---------------------------------------------------------------------------
+PREPROCESSING: dict = {
+    "target_size": (512, 512),      # (width, height)
+    "gaussian_blur_kernel": 3,      # odd integer; 0 to skip
+}
+
+# ---------------------------------------------------------------------------
+# ORB Feature Matching
+# ---------------------------------------------------------------------------
+ORB_CONFIG: dict = {
+    "n_features": 1000,
+    "scale_factor": 1.2,
+    "n_levels": 8,
+    "lowe_ratio": 0.75,
+    "ransac_reproj_threshold": 5.0,
+    "min_good_matches": 4,
+}
+
+# ---------------------------------------------------------------------------
+# Reference Image Aggregation
+# ---------------------------------------------------------------------------
+# Options: "best_match" | "mean" | "median"
+REFERENCE_AGGREGATION_METHOD: str = "best_match"
+
+# For "best_match": which metric to rank by?
+BEST_MATCH_METRIC: str = "ssim_score"
+
+# ---------------------------------------------------------------------------
+# Tampering Classifier
+# ---------------------------------------------------------------------------
+CLASSIFIER_FEATURE_ORDER: list[str] = [
+    "cosine_similarity",
+    "orb_match_ratio",
+    "ssim_score",
+    "edge_difference",
+    "histogram_difference",
+    "shape_difference",
+]
+
+RISK_CLASSES: list[str] = ["LOW", "MEDIUM", "HIGH"]
+
+# Heuristic thresholds (fallback when no .pkl exists)
+HEURISTIC_THRESHOLDS: dict = {
+    "LOW": 0.35,
+    "MEDIUM": 0.70,
+}
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+LOG_LEVEL: str = "INFO"
+LOG_FORMAT: str = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"

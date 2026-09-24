@@ -1,0 +1,26 @@
+﻿# SealScan Backend Requirements
+# Python >= 3.10
+
+# ---- Web framework ----
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9
+
+# ---- Data validation ----
+pydantic>=2.7.0
+
+# ---- Computer Vision ----
+opencv-python-headless>=4.9.0.80
+numpy>=1.26.0
+scikit-image>=0.23.0
+Pillow>=10.3.0
+
+# ---- Machine Learning ----
+scikit-learn>=1.4.0
+
+# ---- Testing ----
+pytest>=8.0.0
+httpx>=0.27.0          # required by TestClient
+
+# ---- Optional: environment variables ----
+python-dotenv>=1.0.0
