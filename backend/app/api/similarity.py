@@ -1,4 +1,4 @@
-﻿"""
+"""
 SealScan -- POST /seal-scan/similarity endpoint.
 
 Full pipeline: quality check -> preprocessing -> feature extraction
@@ -9,19 +9,20 @@ import logging
 import time
 import uuid
 
-from fastapi import APIRouter, File, UploadFile, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 
 from app.services.image_quality import check_quality
 from app.services.similarity_engine import SimilarityEngine
 from app.services.reference_aggregation import aggregate
 from app.models.schemas import (
+    SimilarityRequest,
     SimilaritySuccessResponse,
     SimilarityQualityFailResponse,
     TamperingAssessment,
     AggregatedMetrics,
     ReferenceComparison,
 )
-from app.utils.image_utils import validate_upload, bytes_to_bgr
+from app.utils.image_utils import base64_to_bgr
 
 logger = logging.getLogger("sealscan.api.similarity")
 
@@ -63,38 +64,19 @@ def _get_classifier():
     ),
     tags=["Similarity & Tampering"],
 )
-async def seal_similarity(
-    current_image: UploadFile = File(..., description="Current seal photograph"),
-    reference_images: list[UploadFile] = File(..., description="One or more reference/previous seal images"),
-):
+async def seal_similarity(body: SimilarityRequest):
     request_id = str(uuid.uuid4())[:8]
     t_start = time.perf_counter()
     logger.info(
-        "[%s] POST /seal-scan/similarity | n_references=%d | current=%s",
-        request_id, len(reference_images), current_image.filename,
+        "[%s] POST /seal-scan/similarity | n_references=%d",
+        request_id, len(body.reference_images),
     )
 
     try:
         # ----------------------------------------------------------------
-        # 1. Validate reference count
+        # 1. Decode current image (base64 → BGR)
         # ----------------------------------------------------------------
-        if len(reference_images) == 0:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={
-                    "success": False,
-                    "error": {
-                        "code": "MISSING_REFERENCE_IMAGES",
-                        "message": "At least one reference image must be provided.",
-                    },
-                },
-            )
-
-        # ----------------------------------------------------------------
-        # 2. Validate & decode current image
-        # ----------------------------------------------------------------
-        cur_raw = validate_upload(current_image)
-        cur_bgr = bytes_to_bgr(cur_raw, label="current_image")
+        cur_bgr = base64_to_bgr(body.current_image, label="current_image")
 
         # ----------------------------------------------------------------
         # 3. Image quality check on current image only
@@ -115,14 +97,13 @@ async def seal_similarity(
             )
 
         # ----------------------------------------------------------------
-        # 4. Validate & decode reference images
+        # 4. Decode reference images (base64 → BGR)
         # ----------------------------------------------------------------
         ref_bgrs = []
         ref_ids = []
-        for i, ref_upload in enumerate(reference_images):
+        for i, ref_b64 in enumerate(body.reference_images):
             ref_id = f"reference_{i + 1}"
-            ref_raw = validate_upload(ref_upload)
-            ref_bgr = bytes_to_bgr(ref_raw, label=f"reference image {i + 1}")
+            ref_bgr = base64_to_bgr(ref_b64, label=f"reference image {i + 1}")
             ref_bgrs.append(ref_bgr)
             ref_ids.append(ref_id)
 

@@ -1,7 +1,10 @@
-"""
+﻿"""
 Integration tests for the FastAPI endpoints using TestClient.
+Now uses JSON body with base64-encoded images.
 """
+import base64
 import io
+import json
 import numpy as np
 import cv2
 import pytest
@@ -15,30 +18,28 @@ client = TestClient(app)
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-def _png_bytes(width: int = 512, height: int = 512, variant: int = 0) -> bytes:
+def _b64(variant: int = 0) -> str:
     """
-    Generate a realistic-looking synthetic grayscale PNG that passes ALL quality checks.
-    Uses a horizontal gradient + horizontal stripe texture + mild noise.
-    'variant' shifts the texture phase so different calls produce distinct images.
+    Generate a realistic synthetic grayscale image and return it as a
+    plain base64 string (no data-URI prefix).
     """
     rng = np.random.default_rng(42 + variant)
-    x = np.linspace(0, 255, width).astype(np.uint8)
-    base = np.tile(x, (height, 1))
-    for i in range(variant * 7, height, 32):
+    x = np.linspace(0, 255, 512).astype(np.uint8)
+    base = np.tile(x, (512, 1))
+    for i in range(variant * 7, 512, 32):
         base[i:i + 16, :] = np.clip(base[i:i + 16, :].astype(np.int32) + 40, 0, 255).astype(np.uint8)
-    noise = rng.integers(-5, 6, (height, width)).astype(np.int16)
+    noise = rng.integers(-5, 6, (512, 512)).astype(np.int16)
     gray = np.clip(base.astype(np.int16) + noise, 0, 255).astype(np.uint8)
     bgr = np.stack([gray, gray, gray], axis=-1)
-    _, buf = cv2.imencode(".png", bgr)
-    return buf.tobytes()
+    _, buf = cv2.imencode(".jpg", bgr)
+    return base64.b64encode(buf.tobytes()).decode()
 
 
-def _blurry_png_bytes(width: int = 512, height: int = 512) -> bytes:
+def _blurry_b64() -> str:
     """Constant-value image -> zero sharpness."""
-
-    bgr = np.full((height, width, 3), 128, dtype=np.uint8)
-    _, buf = cv2.imencode(".png", bgr)
-    return buf.tobytes()
+    bgr = np.full((512, 512, 3), 128, dtype=np.uint8)
+    _, buf = cv2.imencode(".jpg", bgr)
+    return base64.b64encode(buf.tobytes()).decode()
 
 
 # ---------------------------------------------------------------------------
@@ -46,10 +47,9 @@ def _blurry_png_bytes(width: int = 512, height: int = 512) -> bytes:
 # ---------------------------------------------------------------------------
 class TestQualityCheckEndpoint:
     def test_quality_check_pass(self):
-        data = _png_bytes()
         response = client.post(
             "/quality-check",
-            files={"image": ("test.png", io.BytesIO(data), "image/png")},
+            json={"image": _b64()},
         )
         assert response.status_code == 200
         body = response.json()
@@ -58,40 +58,40 @@ class TestQualityCheckEndpoint:
         assert "metrics" in body
 
     def test_quality_check_blurry_fails(self):
-        data = _blurry_png_bytes()
         response = client.post(
             "/quality-check",
-            files={"image": ("blurry.png", io.BytesIO(data), "image/png")},
+            json={"image": _blurry_b64()},
         )
         assert response.status_code == 200
         body = response.json()
         assert body["quality_passed"] is False
         assert len(body["failed_metrics"]) >= 1
 
-    def test_quality_check_missing_file(self):
-        response = client.post("/quality-check")
+    def test_quality_check_missing_field(self):
+        response = client.post("/quality-check", json={})
         assert response.status_code == 422
 
-    def test_quality_check_invalid_extension(self):
-        response = client.post(
-            "/quality-check",
-            files={"image": ("test.txt", io.BytesIO(b"not an image"), "text/plain")},
-        )
+    def test_quality_check_empty_string(self):
+        response = client.post("/quality-check", json={"image": ""})
         assert response.status_code == 422
 
-    def test_quality_check_empty_file(self):
+    def test_quality_check_invalid_base64(self):
+        response = client.post("/quality-check", json={"image": "not_valid_base64!!!"})
+        assert response.status_code == 422
+
+    def test_quality_check_data_uri_prefix(self):
+        """Flutter may send data:image/jpeg;base64,... — should be accepted."""
+        b64 = _b64()
         response = client.post(
             "/quality-check",
-            files={"image": ("empty.png", io.BytesIO(b""), "image/png")},
+            json={"image": f"data:image/jpeg;base64,{b64}"},
         )
-        assert response.status_code == 422
+        assert response.status_code == 200
+        body = response.json()
+        assert body["quality_passed"] is True
 
     def test_quality_check_metrics_structure(self):
-        data = _png_bytes()
-        response = client.post(
-            "/quality-check",
-            files={"image": ("test.png", io.BytesIO(data), "image/png")},
-        )
+        response = client.post("/quality-check", json={"image": _b64()})
         body = response.json()
         if body["quality_passed"]:
             metrics = body["metrics"]
@@ -106,14 +106,9 @@ class TestQualityCheckEndpoint:
 # ---------------------------------------------------------------------------
 class TestSimilarityEndpoint:
     def test_similarity_success(self):
-        cur = _png_bytes()
-        ref = _png_bytes()
         response = client.post(
             "/seal-scan/similarity",
-            files=[
-                ("current_image", ("current.png", io.BytesIO(cur), "image/png")),
-                ("reference_images", ("ref1.png", io.BytesIO(ref), "image/png")),
-            ],
+            json={"current_image": _b64(), "reference_images": [_b64()]},
         )
         assert response.status_code == 200
         body = response.json()
@@ -124,16 +119,12 @@ class TestSimilarityEndpoint:
         assert "reference_comparisons" in body
 
     def test_similarity_multiple_references(self):
-        cur = _png_bytes()
-        ref1 = _png_bytes()
-        ref2 = _png_bytes(variant=1)
         response = client.post(
             "/seal-scan/similarity",
-            files=[
-                ("current_image", ("current.png", io.BytesIO(cur), "image/png")),
-                ("reference_images", ("ref1.png", io.BytesIO(ref1), "image/png")),
-                ("reference_images", ("ref2.png", io.BytesIO(ref2), "image/png")),
-            ],
+            json={
+                "current_image": _b64(),
+                "reference_images": [_b64(), _b64(variant=1)],
+            },
         )
         assert response.status_code == 200
         body = response.json()
@@ -142,43 +133,36 @@ class TestSimilarityEndpoint:
         assert body["reference_comparisons"][1]["reference_id"] == "reference_2"
 
     def test_similarity_quality_fail_returns_failed_metrics(self):
-        cur = _blurry_png_bytes()
-        ref = _png_bytes()
         response = client.post(
             "/seal-scan/similarity",
-            files=[
-                ("current_image", ("blurry.png", io.BytesIO(cur), "image/png")),
-                ("reference_images", ("ref.png", io.BytesIO(ref), "image/png")),
-            ],
+            json={"current_image": _blurry_b64(), "reference_images": [_b64()]},
         )
         assert response.status_code == 200
         body = response.json()
         assert body["quality_passed"] is False
         assert body["success"] is False
         assert "failed_metrics" in body
-        # No similarity data when quality fails
         assert "tampering_assessment" not in body
 
-    def test_similarity_missing_reference(self):
-        cur = _png_bytes()
+    def test_similarity_missing_reference_images_field(self):
         response = client.post(
             "/seal-scan/similarity",
-            files=[
-                ("current_image", ("current.png", io.BytesIO(cur), "image/png")),
-            ],
+            json={"current_image": _b64()},
         )
-        # Should get 422 for missing reference_images
+        assert response.status_code == 422
+
+    def test_similarity_empty_reference_list(self):
+        """min_length=1 on reference_images field should reject empty list."""
+        response = client.post(
+            "/seal-scan/similarity",
+            json={"current_image": _b64(), "reference_images": []},
+        )
         assert response.status_code == 422
 
     def test_tampering_assessment_structure(self):
-        cur = _png_bytes()
-        ref = _png_bytes()
         response = client.post(
             "/seal-scan/similarity",
-            files=[
-                ("current_image", ("current.png", io.BytesIO(cur), "image/png")),
-                ("reference_images", ("ref.png", io.BytesIO(ref), "image/png")),
-            ],
+            json={"current_image": _b64(), "reference_images": [_b64()]},
         )
         body = response.json()
         if body.get("success"):
@@ -189,14 +173,9 @@ class TestSimilarityEndpoint:
             assert 0.0 <= ta["tampering_score"] <= 1.0
 
     def test_aggregated_metrics_keys(self):
-        cur = _png_bytes()
-        ref = _png_bytes()
         response = client.post(
             "/seal-scan/similarity",
-            files=[
-                ("current_image", ("current.png", io.BytesIO(cur), "image/png")),
-                ("reference_images", ("ref.png", io.BytesIO(ref), "image/png")),
-            ],
+            json={"current_image": _b64(), "reference_images": [_b64()]},
         )
         body = response.json()
         if body.get("success"):
@@ -204,6 +183,19 @@ class TestSimilarityEndpoint:
             for key in ["cosine_similarity", "orb_match_ratio", "ssim_score",
                         "edge_difference", "histogram_difference", "shape_difference"]:
                 assert key in am
+
+    def test_similarity_data_uri_current_image(self):
+        """data-URI prefix on current_image should be accepted."""
+        b64 = _b64()
+        response = client.post(
+            "/seal-scan/similarity",
+            json={
+                "current_image": f"data:image/jpeg;base64,{b64}",
+                "reference_images": [_b64()],
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["success"] is True
 
 
 # ---------------------------------------------------------------------------

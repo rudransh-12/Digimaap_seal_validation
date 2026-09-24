@@ -1,4 +1,4 @@
-﻿"""
+"""
 SealScan -- POST /quality-check endpoint.
 
 Accepts one image and returns quality validation results.
@@ -9,11 +9,11 @@ import logging
 import time
 import uuid
 
-from fastapi import APIRouter, File, UploadFile, Request
+from fastapi import APIRouter
 
 from app.services.image_quality import check_quality
-from app.models.schemas import QualityCheckResponse, AllMetrics, ErrorBody
-from app.utils.image_utils import validate_upload, bytes_to_bgr
+from app.models.schemas import QualityCheckRequest, QualityCheckResponse
+from app.utils.image_utils import base64_to_bgr
 
 logger = logging.getLogger("sealscan.api.quality")
 
@@ -30,17 +30,14 @@ router = APIRouter()
     ),
     tags=["Quality Check"],
 )
-async def quality_check(image: UploadFile = File(..., description="Seal image to quality-check")):
+async def quality_check(body: QualityCheckRequest):
     request_id = str(uuid.uuid4())[:8]
     t_start = time.perf_counter()
-    logger.info("[%s] POST /quality-check | filename=%s", request_id, image.filename)
+    logger.info("[%s] POST /quality-check", request_id)
 
     try:
-        # 1. Validate file
-        raw = validate_upload(image)
-
-        # 2. Decode
-        bgr = bytes_to_bgr(raw, label="uploaded image")
+        # 1. Decode base64 → BGR
+        bgr = base64_to_bgr(body.image, label="image")
 
         # 3. Quality check
         passed, all_metrics, failed_metrics = check_quality(bgr)

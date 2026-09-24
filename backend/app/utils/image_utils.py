@@ -1,7 +1,8 @@
-﻿"""
+"""
 SealScan -- Image utility helpers.
 """
 from __future__ import annotations
+import base64
 import io
 import logging
 import os
@@ -100,3 +101,59 @@ def to_grayscale(bgr: np.ndarray) -> np.ndarray:
 
 def to_hsv(bgr: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+
+
+def base64_to_bgr(b64_string: str, label: str = "image") -> np.ndarray:
+    """
+    Decode a base64-encoded image string into a BGR NumPy array.
+
+    Accepts both:
+      - plain base64:          "/9j/4AAQSkZJRgAB..."
+      - data-URI prefix:       "data:image/jpeg;base64,/9j/4AAQ..."
+
+    Raises HTTPException on empty input, bad base64, or undecodable image.
+    """
+    if not b64_string or not b64_string.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "EMPTY_IMAGE",
+                    "message": f"The {label} base64 string is empty.",
+                },
+            },
+        )
+
+    # Strip data-URI prefix if present (e.g. "data:image/jpeg;base64,")
+    if "," in b64_string:
+        b64_string = b64_string.split(",", 1)[1]
+
+    try:
+        raw = base64.b64decode(b64_string)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "INVALID_BASE64",
+                    "message": f"The {label} could not be decoded from base64.",
+                },
+            },
+        )
+
+    if len(raw) > MAX_IMAGE_SIZE_BYTES:
+        mb = MAX_IMAGE_SIZE_BYTES // (1024 * 1024)
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "FILE_TOO_LARGE",
+                    "message": f"Decoded image exceeds maximum allowed size of {mb} MB.",
+                },
+            },
+        )
+
+    return bytes_to_bgr(raw, label=label)

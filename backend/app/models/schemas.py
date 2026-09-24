@@ -1,9 +1,35 @@
-﻿"""
+"""
 SealScan -- Pydantic request / response schemas.
 """
 from __future__ import annotations
 from typing import Optional
 from pydantic import BaseModel, Field
+
+
+# ---------------------------------------------------------------------------
+# Request bodies (base64 JSON)
+# ---------------------------------------------------------------------------
+class QualityCheckRequest(BaseModel):
+    image: str = Field(
+        ...,
+        description=(
+            "Base64-encoded image string. Accepts plain base64 or a data-URI "
+            "(e.g. 'data:image/jpeg;base64,...')."
+        ),
+    )
+
+
+class SimilarityRequest(BaseModel):
+    current_image: str = Field(
+        ...,
+        description="Base64-encoded current seal photograph.",
+    )
+    reference_images: list[str] = Field(
+        ...,
+        min_length=1,
+        description="List of base64-encoded reference/previous seal images (at least one required).",
+    )
+
 
 
 # ---------------------------------------------------------------------------
