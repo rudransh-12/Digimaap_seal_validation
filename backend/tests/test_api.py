@@ -1,4 +1,4 @@
-﻿"""
+"""
 Integration tests for the FastAPI endpoints using TestClient.
 Now uses JSON body with base64-encoded images.
 """
@@ -97,6 +97,8 @@ class TestQualityCheckEndpoint:
             metrics = body["metrics"]
             assert "resolution" in metrics
             assert "sharpness" in metrics
+            assert "brenner_sharpness" in metrics
+            assert "canny_edge_density" in metrics
             assert "brightness" in metrics
             assert "contrast" in metrics
 

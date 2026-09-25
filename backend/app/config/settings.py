@@ -1,4 +1,4 @@
-﻿"""
+"""
 SealScan Backend -- Centralised Configuration
 All tunable parameters live here. Change thresholds / paths in this file only.
 """
@@ -33,6 +33,10 @@ QUALITY_THRESHOLDS: dict = {
     "min_height": 320,
     # Sharpness -- Laplacian variance (higher = sharper)
     "min_sharpness": 80.0,
+    # Brenner sharpness -- mean squared difference with step 2 (higher = sharper)
+    "min_brenner_sharpness": 50.0,
+    # Canny Edge Density -- fraction of edge pixels in [0.0, 1.0]
+    "min_canny_edge_density": 0.005,
     # Brightness -- mean greyscale pixel value
     "min_brightness": 30.0,
     "max_brightness": 225.0,

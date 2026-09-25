@@ -1,4 +1,4 @@
-﻿"""
+"""
 SealScan -- Image Quality Service.
 
 Evaluates a raw BGR image against configurable thresholds and returns
@@ -23,6 +23,29 @@ logger = logging.getLogger("sealscan.image_quality")
 def _measure_sharpness(gray: np.ndarray) -> float:
     """Laplacian variance -- higher = sharper."""
     return float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
+
+def _measure_brenner_sharpness(gray: np.ndarray) -> float:
+    """
+    Brenner gradient focus measure -- higher = sharper.
+    Computes mean squared difference between pixels separated by 2 units along both axes.
+    """
+    h, w = gray.shape
+    if w <= 2 or h <= 2:
+        return 0.0
+
+    diff_x = (gray[:, 2:].astype(np.float64) - gray[:, :-2].astype(np.float64)) ** 2
+    diff_y = (gray[2:, :].astype(np.float64) - gray[:-2, :].astype(np.float64)) ** 2
+    return float(0.5 * (np.mean(diff_x) + np.mean(diff_y)))
+
+
+def _measure_canny_edge_density(gray: np.ndarray, low_thresh: int = 50, high_thresh: int = 150) -> float:
+    """
+    Ratio of edge pixels detected by Canny detector to total image pixels.
+    Returns a float in [0.0, 1.0].
+    """
+    edges = cv2.Canny(gray, low_thresh, high_thresh)
+    return float(np.count_nonzero(edges) / edges.size)
 
 
 def _measure_brightness(gray: np.ndarray) -> float:
@@ -63,6 +86,8 @@ def check_quality(bgr: np.ndarray) -> tuple[bool, AllMetrics, list[MetricDetail]
 
     h, w = bgr.shape[:2]
     sharpness = _measure_sharpness(gray)
+    brenner = _measure_brenner_sharpness(gray)
+    canny_density = _measure_canny_edge_density(gray)
     brightness = _measure_brightness(gray)
     contrast = _measure_contrast(gray)
     noise = _estimate_noise(gray)
@@ -74,7 +99,7 @@ def check_quality(bgr: np.ndarray) -> tuple[bool, AllMetrics, list[MetricDetail]
     res_detail = ResolutionDetail(width=w, height=h, passed=res_passed)
 
     # ------------------------------------------------------------------
-    # Sharpness
+    # Sharpness (Laplacian)
     # ------------------------------------------------------------------
     sharp_passed = sharpness >= t["min_sharpness"]
     sharp_detail = MetricDetail(
@@ -83,6 +108,30 @@ def check_quality(bgr: np.ndarray) -> tuple[bool, AllMetrics, list[MetricDetail]
         threshold=t["min_sharpness"],
         passed=sharp_passed,
         message=None if sharp_passed else "Image is too blurry. Please retake with a steadier hand.",
+    )
+
+    # ------------------------------------------------------------------
+    # Brenner Sharpness
+    # ------------------------------------------------------------------
+    brenner_passed = brenner >= t["min_brenner_sharpness"]
+    brenner_detail = MetricDetail(
+        metric="brenner_sharpness",
+        value=round(brenner, 4),
+        threshold=t["min_brenner_sharpness"],
+        passed=brenner_passed,
+        message=None if brenner_passed else "Image focus is insufficient according to Brenner gradient.",
+    )
+
+    # ------------------------------------------------------------------
+    # Canny Edge Density
+    # ------------------------------------------------------------------
+    canny_passed = canny_density >= t["min_canny_edge_density"]
+    canny_detail = MetricDetail(
+        metric="canny_edge_density",
+        value=round(canny_density, 4),
+        threshold=t["min_canny_edge_density"],
+        passed=canny_passed,
+        message=None if canny_passed else "Insufficient edge details detected in the seal image.",
     )
 
     # ------------------------------------------------------------------
@@ -133,6 +182,8 @@ def check_quality(bgr: np.ndarray) -> tuple[bool, AllMetrics, list[MetricDetail]
     all_metrics = AllMetrics(
         resolution=res_detail,
         sharpness=sharp_detail,
+        brenner_sharpness=brenner_detail,
+        canny_edge_density=canny_detail,
         brightness=bright_detail,
         contrast=contrast_detail,
         noise=noise_detail,
@@ -149,15 +200,15 @@ def check_quality(bgr: np.ndarray) -> tuple[bool, AllMetrics, list[MetricDetail]
                 message=f"Image resolution {w}x{h} is below the minimum {t['min_width']}x{t['min_height']}.",
             )
         )
-    for d in [sharp_detail, bright_detail, contrast_detail, noise_detail]:
+    for d in [sharp_detail, brenner_detail, canny_detail, bright_detail, contrast_detail, noise_detail]:
         if not d.passed:
             failed.append(d)
 
     passed = len(failed) == 0
 
     logger.info(
-        "Quality check | passed=%s | sharpness=%.2f brightness=%.2f contrast=%.2f noise=%.2f res=%dx%d",
-        passed, sharpness, brightness, contrast, noise, w, h,
+        "Quality check | passed=%s | laplacian=%.2f brenner=%.2f canny=%.4f brightness=%.2f contrast=%.2f noise=%.2f res=%dx%d",
+        passed, sharpness, brenner, canny_density, brightness, contrast, noise, w, h,
     )
 
     return passed, all_metrics, failed

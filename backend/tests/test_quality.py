@@ -1,4 +1,4 @@
-﻿"""
+"""
 Tests for the Image Quality Service.
 """
 import numpy as np
@@ -67,6 +67,42 @@ class TestSharpness:
         assert len(sharpness_failures) == 1
         assert sharpness_failures[0].value < QUALITY_THRESHOLDS["min_sharpness"]
         assert "blurry" in sharpness_failures[0].message.lower()
+
+
+# ---------------------------------------------------------------------------
+# Brenner Sharpness tests
+# ---------------------------------------------------------------------------
+class TestBrennerSharpness:
+    def test_sharp_image_passes(self):
+        bgr = _make_sharp_bgr()
+        passed, metrics, failed = check_quality(bgr)
+        assert metrics.brenner_sharpness.passed is True
+        assert metrics.brenner_sharpness.value >= QUALITY_THRESHOLDS["min_brenner_sharpness"]
+
+    def test_blurry_image_fails(self):
+        bgr = _make_blurry_bgr()
+        passed, metrics, failed = check_quality(bgr)
+        assert metrics.brenner_sharpness.passed is False
+        failures = [m for m in failed if m.metric == "brenner_sharpness"]
+        assert len(failures) == 1
+
+
+# ---------------------------------------------------------------------------
+# Canny Edge Density tests
+# ---------------------------------------------------------------------------
+class TestCannyEdgeDensity:
+    def test_structured_image_passes(self):
+        bgr = _make_sharp_bgr()
+        passed, metrics, failed = check_quality(bgr)
+        assert metrics.canny_edge_density.passed is True
+        assert metrics.canny_edge_density.value >= QUALITY_THRESHOLDS["min_canny_edge_density"]
+
+    def test_flat_image_fails(self):
+        bgr = _make_blurry_bgr()
+        passed, metrics, failed = check_quality(bgr)
+        assert metrics.canny_edge_density.passed is False
+        failures = [m for m in failed if m.metric == "canny_edge_density"]
+        assert len(failures) == 1
 
 
 # ---------------------------------------------------------------------------

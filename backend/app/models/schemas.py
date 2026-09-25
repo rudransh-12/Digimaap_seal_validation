@@ -52,6 +52,8 @@ class ResolutionDetail(BaseModel):
 class AllMetrics(BaseModel):
     resolution: ResolutionDetail
     sharpness: MetricDetail
+    brenner_sharpness: MetricDetail
+    canny_edge_density: MetricDetail
     brightness: MetricDetail
     contrast: MetricDetail
     noise: MetricDetail
