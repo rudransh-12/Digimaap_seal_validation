@@ -10,6 +10,19 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parents[3]   # project root (backend/)
 MODEL_DIR = BASE_DIR / "model"
 CLASSIFIER_PATH = MODEL_DIR / "tampering_classifier.pkl"
+BLUR_CLASSIFIER_PATH = MODEL_DIR / "blur_classifier.pkl"
+BLUR_CLASSIFIER_METADATA_PATH = MODEL_DIR / "blur_classifier_metadata.json"
+
+# Feature order expected by the blur classifier Random Forest
+BLUR_CLASSIFIER_FEATURE_ORDER: list[str] = [
+    "laplacian_variance",
+    "edge_strength",
+    "noise",
+    "brenner_sharpness",
+    "canny_edge_density",
+    "fft_high_frequency_ratio",
+    "blur_effect",
+]
 
 # ---------------------------------------------------------------------------
 # API / File-upload limits
@@ -34,14 +47,16 @@ QUALITY_THRESHOLDS: dict = {
     # Sharpness -- Laplacian variance (higher = sharper)
     "min_sharpness": 80.0,
     # Brenner sharpness -- mean squared difference with step 2 (higher = sharper)
-    "min_brenner_sharpness": 50.0,
+    "min_brenner_sharpness": 100.0,
     # Canny Edge Density -- fraction of edge pixels in [0.0, 1.0]
-    "min_canny_edge_density": 0.005,
+    "min_canny_edge_density": 0.008,
+    # Blur Classifier ML model -- min probability of being NOT_BLURRY in [0.0, 1.0]
+    "min_blur_classifier_score": 0.50,
     # Brightness -- mean greyscale pixel value
     "min_brightness": 30.0,
     "max_brightness": 225.0,
     # Contrast -- std-dev of greyscale values
-    "min_contrast": 20.0,
+    "min_contrast": 25.0,
     # Noise estimate
     "max_noise": 15.0,
 }

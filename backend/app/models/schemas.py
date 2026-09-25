@@ -54,6 +54,7 @@ class AllMetrics(BaseModel):
     sharpness: MetricDetail
     brenner_sharpness: MetricDetail
     canny_edge_density: MetricDetail
+    blur_classifier: MetricDetail
     brightness: MetricDetail
     contrast: MetricDetail
     noise: MetricDetail

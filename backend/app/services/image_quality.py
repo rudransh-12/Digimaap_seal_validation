@@ -12,9 +12,13 @@ import numpy as np
 
 from app.config.settings import QUALITY_THRESHOLDS
 from app.models.schemas import MetricDetail, AllMetrics, ResolutionDetail
+from app.services.blur_classifier import BlurClassifier
 from app.utils.image_utils import to_grayscale
 
 logger = logging.getLogger("sealscan.image_quality")
+
+# Preload blur classifier once
+_blur_classifier = BlurClassifier()
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -92,6 +96,9 @@ def check_quality(bgr: np.ndarray) -> tuple[bool, AllMetrics, list[MetricDetail]
     contrast = _measure_contrast(gray)
     noise = _estimate_noise(gray)
 
+    # ML Blur Classification
+    blur_pred = _blur_classifier.predict(gray, threshold=t.get("min_blur_classifier_score", 0.50))
+
     # ------------------------------------------------------------------
     # Resolution
     # ------------------------------------------------------------------
@@ -132,6 +139,18 @@ def check_quality(bgr: np.ndarray) -> tuple[bool, AllMetrics, list[MetricDetail]
         threshold=t["min_canny_edge_density"],
         passed=canny_passed,
         message=None if canny_passed else "Insufficient edge details detected in the seal image.",
+    )
+
+    # ------------------------------------------------------------------
+    # Blur Classifier (AI Model)
+    # ------------------------------------------------------------------
+    blur_clf_threshold = float(t.get("min_blur_classifier_score", 0.50))
+    blur_clf_detail = MetricDetail(
+        metric="blur_classifier",
+        value=round(blur_pred.probability_not_blurry, 4),
+        threshold=blur_clf_threshold,
+        passed=blur_pred.passed,
+        message=None if blur_pred.passed else "Image failed AI blur assessment. Please ensure camera is focused and steady.",
     )
 
     # ------------------------------------------------------------------
@@ -184,6 +203,7 @@ def check_quality(bgr: np.ndarray) -> tuple[bool, AllMetrics, list[MetricDetail]
         sharpness=sharp_detail,
         brenner_sharpness=brenner_detail,
         canny_edge_density=canny_detail,
+        blur_classifier=blur_clf_detail,
         brightness=bright_detail,
         contrast=contrast_detail,
         noise=noise_detail,
@@ -200,15 +220,15 @@ def check_quality(bgr: np.ndarray) -> tuple[bool, AllMetrics, list[MetricDetail]
                 message=f"Image resolution {w}x{h} is below the minimum {t['min_width']}x{t['min_height']}.",
             )
         )
-    for d in [sharp_detail, brenner_detail, canny_detail, bright_detail, contrast_detail, noise_detail]:
+    for d in [sharp_detail, brenner_detail, canny_detail, blur_clf_detail, bright_detail, contrast_detail, noise_detail]:
         if not d.passed:
             failed.append(d)
 
     passed = len(failed) == 0
 
     logger.info(
-        "Quality check | passed=%s | laplacian=%.2f brenner=%.2f canny=%.4f brightness=%.2f contrast=%.2f noise=%.2f res=%dx%d",
-        passed, sharpness, brenner, canny_density, brightness, contrast, noise, w, h,
+        "Quality check | passed=%s | laplacian=%.2f brenner=%.2f canny=%.4f blur_clf=%.4f brightness=%.2f contrast=%.2f noise=%.2f res=%dx%d",
+        passed, sharpness, brenner, canny_density, blur_pred.probability_not_blurry, brightness, contrast, noise, w, h,
     )
 
     return passed, all_metrics, failed

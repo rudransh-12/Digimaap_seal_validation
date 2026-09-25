@@ -99,6 +99,7 @@ class TestQualityCheckEndpoint:
             assert "sharpness" in metrics
             assert "brenner_sharpness" in metrics
             assert "canny_edge_density" in metrics
+            assert "blur_classifier" in metrics
             assert "brightness" in metrics
             assert "contrast" in metrics
 

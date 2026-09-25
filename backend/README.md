@@ -1,10 +1,10 @@
-﻿# SealScan Backend
+# SealScan Backend
 
 > **AI-Assisted Legal Metrology Seal Verification System**
 >
 > _All tampering risk assessments are decision-support tools only.
 > They do not constitute a legal determination.
-> The inspecting officer''s final judgment is authoritative._
+> The inspecting officer's final judgment is authoritative._
 
 ---
 
@@ -13,14 +13,14 @@
 1. [Architecture Overview](#architecture-overview)
 2. [Prerequisites](#prerequisites)
 3. [Quick Start](#quick-start)
-4. [Generate the Demo Classifier](#generate-the-demo-classifier)
+4. [Trained Models](#trained-models)
 5. [Configuration](#configuration)
 6. [API Endpoints](#api-endpoints)
    - [POST /quality-check](#post-quality-check)
    - [POST /seal-scan/similarity](#post-seal-scansimilarity)
-7. [Similarity Metrics Reference](#similarity-metrics-reference)
-8. [Tampering Score Reference](#tampering-score-reference)
-9. [Quality Metric Thresholds](#quality-metric-thresholds)
+7. [Image Quality Metrics](#image-quality-metrics)
+8. [Similarity Metrics Reference](#similarity-metrics-reference)
+9. [Tampering Score Reference](#tampering-score-reference)
 10. [Error Codes](#error-codes)
 11. [Running Tests](#running-tests)
 12. [Flutter Integration Guide](#flutter-integration-guide)
@@ -33,61 +33,62 @@
 ## Architecture Overview
 
 ```
-Flutter Client
+Flutter Client (Base64 JSON Payloads)
        |
-       |  multipart/form-data
+       |  POST /quality-check       POST /seal-scan/similarity
        v
-+----------------------------------------------+
-|              FastAPI Application              |
-|  POST /quality-check                         |
-|  POST /seal-scan/similarity                  |
-+----------------------------------------------+
-       |
-       v
-+----------------------------------------------+
-|           API Layer (thin routers)           |
-+----------------------------------------------+
++-------------------------------------------------------------+
+|                     FastAPI Application                     |
+|  POST /quality-check          POST /seal-scan/similarity    |
++-------------------------------------------------------------+
        |
        v
-+----------------------------------------------+
-|         File Validation (image_utils)        |
-+----------------------------------------------+
++-------------------------------------------------------------+
+|                  API Layer (Thin Routers)                   |
++-------------------------------------------------------------+
        |
        v
-+----------------------------------------------+
-|         Image Quality Service                |
-|   - Resolution check                        |
-|   - Sharpness (Laplacian variance)          |
-|   - Brightness (mean pixel)                 |
-|   - Contrast (std dev)                      |
-|   - Noise estimate                          |
-+----------------------------------------------+
-   FAIL |              | PASS
-        v              v
-  Return failed    Preprocessing
-  metrics          (resize, denoise,
-                    grayscale, HSV,
-                    edge map)
-                        |
-                        v
-               Feature Extraction
-               - Cosine Similarity
-               - ORB Match Ratio (+ RANSAC)
-               - SSIM Score
-               - Edge Difference
-               - Histogram Difference (HSV)
-               - Shape Difference (Hu Moments)
-                        |
-                        v
-               Reference Aggregation
-               (best_match / mean / median)
-                        |
-                        v
-               Tampering Classifier
-               (.pkl or heuristic fallback)
-                        |
-                        v
-               JSON Response
++-------------------------------------------------------------+
+|         Base64 Decoding & Validation (image_utils)          |
++-------------------------------------------------------------+
+       |
+       v
++-------------------------------------------------------------+
+|                    Image Quality Service                    |
+|   - Resolution check (min 320x320)                          |
+|   - Laplacian Variance Sharpness                            |
+|   - Brenner Focus Sharpness                                 |
+|   - Canny Edge Density                                      |
+|   - AI Blur Classifier (RandomForest ML)                    |
+|   - Brightness (mean pixel)                                 |
+|   - Contrast (std dev)                                      |
+|   - Noise estimate (Gaussian residual)                      |
++-------------------------------------------------------------+
+   FAIL |                                       | PASS
+        v                                       v
+  Return failed                           Preprocessing
+  metrics response                        (resize 512x512, denoise,
+                                           grayscale, HSV, Canny edges)
+                                                |
+                                                v
+                                       Feature Extraction
+                                       - Cosine Similarity
+                                       - ORB Match Ratio (+ RANSAC)
+                                       - SSIM Score
+                                       - Edge Difference
+                                       - Histogram Difference (HSV)
+                                       - Shape Difference (Hu Moments)
+                                                |
+                                                v
+                                       Reference Aggregation
+                                       (best_match / mean / median)
+                                                |
+                                                v
+                                       Tampering Classifier
+                                       (.pkl or heuristic fallback)
+                                                |
+                                                v
+                                       JSON Response
 ```
 
 ---
@@ -115,58 +116,52 @@ source .venv/bin/activate
 # 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. (Optional but recommended) Generate the demo classifier
-python model/generate_demo_model.py
-
-# 5. Start the development server
+# 4. Start the development server
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 The API will be live at: http://localhost:8000
-Interactive docs: http://localhost:8000/docs
+Interactive Swagger docs: http://localhost:8000/docs
 OpenAPI JSON: http://localhost:8000/openapi.json
 
 ---
 
-## Generate the Demo Classifier
+## Trained Models
 
-The system works without a trained model (heuristic fallback is used automatically),
-but for real deployments train and place the model at `model/tampering_classifier.pkl`.
+The backend utilizes two machine learning models located in `model/`:
 
-To generate a synthetic demo model:
+1. **Blur Classifier (`model/blur_classifier.pkl`)**:
+   - Random Forest binary classifier (150 trees, max depth 6) for image sharpness verification.
+   - Evaluates 7 features: Laplacian variance, Sobel edge strength, Gaussian noise residual, Brenner horizontal second-difference, Canny edge density (100, 200), 2D FFT spectral energy ratio, and `skimage.measure.blur_effect`.
+   - Loaded once at startup in `app/services/blur_classifier.py`.
 
-```bash
-python model/generate_demo_model.py
-```
-
-This creates `model/tampering_classifier.pkl` using 1500 synthetic training samples.
-
-To replace with a real model:
-1. Train a sklearn-compatible classifier on real seal comparison data.
-2. Ensure your training features are in the same order as `CLASSIFIER_FEATURE_ORDER`
-   in `app/config/settings.py`.
-3. Save with `pickle.dump(model, open("model/tampering_classifier.pkl", "wb"))`.
-4. Restart the server — the model is loaded once at startup.
+2. **Tampering Classifier (`model/tampering_classifier.pkl`)**:
+   - Random Forest multi-class risk classifier (`LOW`, `MEDIUM`, `HIGH`) for seal tampering detection.
+   - Can be regenerated or demo-trained using `python model/generate_demo_model.py`.
+   - Loaded once at startup in `app/services/tampering_classifier.py`.
 
 ---
 
 ## Configuration
 
-All tunable parameters are in `app/config/settings.py`:
+All tunable thresholds and paths are centralized in `app/config/settings.py`:
 
 | Parameter | Default | Description |
-|-----------|---------|-------------|
-| `MAX_IMAGE_SIZE_BYTES` | 20 MB | Maximum upload file size |
+|---|---|---|
+| `MAX_IMAGE_SIZE_BYTES` | 20 MB | Maximum upload payload size |
 | `QUALITY_THRESHOLDS["min_width"]` | 320 | Minimum image width (px) |
 | `QUALITY_THRESHOLDS["min_height"]` | 320 | Minimum image height (px) |
 | `QUALITY_THRESHOLDS["min_sharpness"]` | 80.0 | Minimum Laplacian variance |
+| `QUALITY_THRESHOLDS["min_brenner_sharpness"]` | 100.0 | Minimum Brenner gradient focus measure |
+| `QUALITY_THRESHOLDS["min_canny_edge_density"]` | 0.008 | Minimum ratio of edge pixels (0.0 - 1.0) |
+| `QUALITY_THRESHOLDS["min_blur_classifier_score"]` | 0.50 | Minimum AI probability of being `NOT_BLURRY` |
 | `QUALITY_THRESHOLDS["min_brightness"]` | 30.0 | Minimum mean pixel value |
 | `QUALITY_THRESHOLDS["max_brightness"]` | 225.0 | Maximum mean pixel value |
-| `QUALITY_THRESHOLDS["min_contrast"]` | 20.0 | Minimum std-dev of pixel values |
-| `QUALITY_THRESHOLDS["max_noise"]` | 15.0 | Maximum noise std-dev |
-| `PREPROCESSING["target_size"]` | (512, 512) | Working resolution for CV |
-| `REFERENCE_AGGREGATION_METHOD` | `best_match` | How multiple references are aggregated |
-| `BEST_MATCH_METRIC` | `ssim_score` | Metric used to select the best reference |
+| `QUALITY_THRESHOLDS["min_contrast"]` | 25.0 | Minimum std-dev of pixel values |
+| `QUALITY_THRESHOLDS["max_noise"]` | 15.0 | Maximum noise residual std-dev |
+| `PREPROCESSING["target_size"]` | (512, 512) | Working resolution for CV operations |
+| `REFERENCE_AGGREGATION_METHOD` | `best_match` | Aggregation method across multiple reference images |
+| `BEST_MATCH_METRIC` | `ssim_score` | Metric used to select best reference image |
 
 ---
 
@@ -174,31 +169,35 @@ All tunable parameters are in `app/config/settings.py`:
 
 ### POST /quality-check
 
-**Purpose:** Validate image quality only. No similarity or tampering analysis is performed.
+**Purpose:** Rapidly validate image quality without running the full comparison pipeline.
 
-**Request:** `multipart/form-data`
+**Request:** `Content-Type: application/json`
+```json
+{
+  "image": "<base64 encoded image string or data:image/...;base64,...>"
+}
+```
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `image` | file | Yes | Seal photograph (JPEG, PNG, BMP, TIFF, WebP) |
-
-**Success Response (200):**
+**Success Response (200 OK):**
 ```json
 {
   "success": true,
   "quality_passed": true,
   "message": "Image quality is satisfactory.",
   "metrics": {
-    "resolution": { "width": 1920, "height": 1080, "passed": true },
-    "sharpness": { "metric": "sharpness", "value": 245.62, "threshold": 80.0, "passed": true },
-    "brightness": { "metric": "brightness", "value": 128.4, "threshold": 225.0, "passed": true },
-    "contrast": { "metric": "contrast", "value": 57.2, "threshold": 20.0, "passed": true },
-    "noise": { "metric": "noise", "value": 3.1, "threshold": 15.0, "passed": true }
+    "resolution":        { "width": 1920, "height": 1080, "passed": true },
+    "sharpness":         { "metric": "sharpness",          "value": 245.62, "threshold": 80.0,   "passed": true, "message": null },
+    "brenner_sharpness": { "metric": "brenner_sharpness",  "value": 412.50, "threshold": 100.0,  "passed": true, "message": null },
+    "canny_edge_density":{ "metric": "canny_edge_density", "value": 0.0452, "threshold": 0.008,  "passed": true, "message": null },
+    "blur_classifier":   { "metric": "blur_classifier",   "value": 0.9820, "threshold": 0.50,   "passed": true, "message": null },
+    "brightness":        { "metric": "brightness",        "value": 128.40, "threshold": 225.0,  "passed": true, "message": null },
+    "contrast":          { "metric": "contrast",          "value": 57.20,  "threshold": 25.0,   "passed": true, "message": null },
+    "noise":             { "metric": "noise",             "value": 3.10,   "threshold": 15.0,   "passed": true, "message": null }
   }
 }
 ```
 
-**Failure Response (200):**
+**Failure Response (200 OK):**
 ```json
 {
   "success": false,
@@ -211,6 +210,13 @@ All tunable parameters are in `app/config/settings.py`:
       "threshold": 80.0,
       "passed": false,
       "message": "Image is too blurry. Please retake with a steadier hand."
+    },
+    {
+      "metric": "blur_classifier",
+      "value": 0.1240,
+      "threshold": 0.50,
+      "passed": false,
+      "message": "Image failed AI blur assessment. Please ensure camera is focused and steady."
     }
   ]
 }
@@ -220,48 +226,52 @@ All tunable parameters are in `app/config/settings.py`:
 
 ### POST /seal-scan/similarity
 
-**Purpose:** Full tampering assessment pipeline — quality check, feature extraction, and classifier.
+**Purpose:** Full seal verification pipeline (Quality check -> Preprocessing -> Pairwise feature extraction -> Reference aggregation -> Tampering classification).
 
-**Request:** `multipart/form-data`
+**Request:** `Content-Type: application/json`
+```json
+{
+  "current_image": "<base64 encoded image string>",
+  "reference_images": [
+    "<base64 reference image 1>",
+    "<base64 reference image 2>"
+  ]
+}
+```
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `current_image` | file | Yes | Current seal photograph |
-| `reference_images` | file[] | Yes (>=1) | Previously verified reference seal images |
-
-**Success Response (200):**
+**Success Response (200 OK):**
 ```json
 {
   "success": true,
   "quality_passed": true,
-  "message": "Image quality satisfactory. Similarity analysis completed. Tampering risk assessment: LOW. ...",
+  "message": "Image quality satisfactory. Similarity analysis completed. Tampering risk assessment: LOW. This is an AI-assisted assessment; the inspecting officer's determination is authoritative.",
   "tampering_assessment": {
     "tampering_score": 0.12,
     "risk_class": "LOW"
   },
   "aggregated_metrics": {
-    "cosine_similarity": 0.97,
-    "orb_match_ratio": 0.81,
-    "ssim_score": 0.94,
-    "edge_difference": 0.04,
+    "cosine_similarity":    0.97,
+    "orb_match_ratio":      0.81,
+    "ssim_score":           0.94,
+    "edge_difference":      0.04,
     "histogram_difference": 0.06,
-    "shape_difference": 0.02
+    "shape_difference":     0.02
   },
   "reference_comparisons": [
     {
-      "reference_id": "reference_1",
-      "cosine_similarity": 0.97,
-      "orb_match_ratio": 0.81,
-      "ssim_score": 0.94,
-      "edge_difference": 0.04,
+      "reference_id":         "reference_1",
+      "cosine_similarity":    0.97,
+      "orb_match_ratio":      0.81,
+      "ssim_score":           0.94,
+      "edge_difference":      0.04,
       "histogram_difference": 0.06,
-      "shape_difference": 0.02
+      "shape_difference":     0.02
     }
   ]
 }
 ```
 
-**Quality Failure Response (200):**
+**Quality Failure Response (200 OK):**
 ```json
 {
   "success": false,
@@ -281,14 +291,29 @@ All tunable parameters are in `app/config/settings.py`:
 
 ---
 
+## Image Quality Metrics
+
+| Metric | Method | Pass Condition | Description |
+|---|---|---|---|
+| `resolution` | Pixel dimensions | width >= 320 AND height >= 320 | Minimum resolution required |
+| `sharpness` | Laplacian variance | value >= 80.0 | High-frequency edge gradient variance |
+| `brenner_sharpness` | Brenner horizontal second-diff | value >= 100.0 | Step-2 squared intensity differential focus |
+| `canny_edge_density` | Canny edge pixel ratio | value >= 0.008 | Ensures presence of fine seal engravings |
+| `blur_classifier` | Pretrained Random Forest | value >= 0.50 | Probability of image being `NOT_BLURRY` |
+| `brightness` | Greyscale mean pixel | 30.0 <= value <= 225.0 | Checks underexposure / overexposure |
+| `contrast` | Greyscale std-dev | value >= 25.0 | Checks dynamic range of the seal |
+| `noise` | Gaussian blur residual std | value <= 15.0 | High-frequency sensor noise detection |
+
+---
+
 ## Similarity Metrics Reference
 
 | Metric | Range | Better When | Description |
-|--------|-------|-------------|-------------|
-| `cosine_similarity` | [0, 1] | Higher | Vector-space similarity of flattened greyscale pixel arrays |
-| `orb_match_ratio` | [0, 1] | Higher | Ratio of geometrically verified ORB keypoint matches to total keypoints |
-| `ssim_score` | [0, 1] | Higher | Structural Similarity Index — measures luminance, contrast, structure |
-| `edge_difference` | [0, 1] | Lower | Mean absolute difference of Canny edge maps |
+|---|---|---|---|
+| `cosine_similarity` | [0, 1] | Higher | Normalised greyscale dot product similarity |
+| `orb_match_ratio` | [0, 1] | Higher | Geometrically verified ORB keypoints (RANSAC homography) |
+| `ssim_score` | [0, 1] | Higher | Structural Similarity Index (luminance, contrast, structure) |
+| `edge_difference` | [0, 1] | Lower | Mean absolute difference of Otsu-Canny edge maps |
 | `histogram_difference` | [0, 1] | Lower | Bhattacharyya distance of normalised HSV colour histograms |
 | `shape_difference` | [0, 1] | Lower | Log-normalised Hu-moment distance |
 
@@ -296,46 +321,23 @@ All tunable parameters are in `app/config/settings.py`:
 
 ## Tampering Score Reference
 
-`tampering_score` is a float in [0, 1] produced by the classifier.
+`tampering_score` is a value in `[0, 1]` indicating the estimated risk of seal modification:
 
-- **0.0** — metrics indicate the images are virtually identical
-- **1.0** — metrics indicate highly dissimilar images (high tampering risk)
-
-**Important:** Unless the deployed model has been explicitly calibrated
-(e.g., via `CalibratedClassifierCV`), the score is NOT a statistical probability.
-It is a risk indicator derived from the classifier''s output.
-
-| `risk_class` | Interpretation |
-|---|---|
-| `LOW` | Similarity metrics suggest the seal is consistent with the reference. |
-| `MEDIUM` | Moderate differences detected. Recommend officer review. |
-| `HIGH` | Significant differences detected. Seal should be physically inspected. |
-
----
-
-## Quality Metric Thresholds
-
-| Metric | Method | Pass Condition |
-|--------|--------|----------------|
-| Resolution | Pixel dimensions | width >= 320 AND height >= 320 |
-| Sharpness | Laplacian variance | value >= 80.0 |
-| Brightness | Mean greyscale | 30.0 <= value <= 225.0 |
-| Contrast | Std-dev greyscale | value >= 20.0 |
-| Noise | Blur residual std | value <= 15.0 |
-
-All thresholds are configurable in `app/config/settings.py`.
+* **0.0 - 0.35 (`LOW`)**: Metrics indicate the seal matches known reference specifications.
+* **0.36 - 0.70 (`MEDIUM`)**: Moderate differences detected; officer review advised.
+* **0.71 - 1.00 (`HIGH`)**: Substantial discrepancies detected; manual physical inspection recommended.
 
 ---
 
 ## Error Codes
 
 | Code | HTTP Status | Description |
-|------|-------------|-------------|
-| `INVALID_FILE_TYPE` | 422 | Unsupported file extension |
-| `EMPTY_FILE` | 422 | Uploaded file has zero bytes |
-| `FILE_TOO_LARGE` | 413 | File exceeds 20 MB limit |
-| `INVALID_IMAGE` | 422 | File cannot be decoded as an image |
-| `MISSING_REFERENCE_IMAGES` | 422 | No reference images provided |
+|---|---|---|
+| `INVALID_FILE_TYPE` | 422 | Unsupported format |
+| `EMPTY_FILE` | 422 | Empty base64 payload |
+| `FILE_TOO_LARGE` | 413 | Image exceeds 20 MB limit |
+| `INVALID_IMAGE` | 422 | Base64 string cannot be decoded as a valid image |
+| `MISSING_REFERENCE_IMAGES` | 422 | `reference_images` array is empty or missing |
 | `INTERNAL_ERROR` | 500 | Unexpected server error |
 
 ---
@@ -344,13 +346,13 @@ All thresholds are configurable in `app/config/settings.py`.
 
 ```bash
 cd backend
-pytest tests/ -v
+python -m pytest tests/ -v
 ```
 
-Test files:
-- `tests/test_quality.py` — Image quality service unit tests
-- `tests/test_similarity.py` — Feature extraction, aggregation, classifier unit tests
-- `tests/test_api.py` — End-to-end FastAPI integration tests
+Test coverage includes:
+- `tests/test_quality.py` — Quality metric computations, Brenner focus, Canny density, and ML Blur Classifier
+- `tests/test_similarity.py` — Feature extraction, aggregation, tampering classifier inference
+- `tests/test_api.py` — End-to-end FastAPI integration testing for both endpoints
 
 ---
 
@@ -359,29 +361,21 @@ Test files:
 ### Quality Check
 
 ```dart
-Future<Map<String, dynamic>> checkQuality(File imageFile) async {
-  final request = http.MultipartRequest(
-    "POST",
-    Uri.parse("http://<server>:8000/quality-check"),
-  );
-  request.files.add(
-    await http.MultipartFile.fromPath("image", imageFile.path),
-  );
-  final response = await request.send();
-  final body = await response.stream.bytesToString();
-  return json.decode(body);
-}
-```
+import 'dart:convert';
+import 'dart:io';
+import 'package:http/http.dart' as http;
 
-**Response handling:**
-```dart
-if (result["quality_passed"] == true) {
-  // Proceed with inspection
-} else {
-  final failedMetrics = result["failed_metrics"] as List;
-  for (final m in failedMetrics) {
-    showError(m["message"]); // e.g. "Image is too blurry"
-  }
+Future<Map<String, dynamic>> checkQuality(File imageFile) async {
+  final bytes = await imageFile.readAsBytes();
+  final base64String = base64Encode(bytes);
+
+  final response = await http.post(
+    Uri.parse('http://<server-ip>:8000/quality-check'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({'image': base64String}),
+  );
+
+  return jsonDecode(response.body);
 }
 ```
 
@@ -389,44 +383,26 @@ if (result["quality_passed"] == true) {
 
 ```dart
 Future<Map<String, dynamic>> assessTampering(
-  File currentImage,
-  List<File> referenceImages,
+  File currentImageFile,
+  List<File> referenceImageFiles,
 ) async {
-  final request = http.MultipartRequest(
-    "POST",
-    Uri.parse("http://<server>:8000/seal-scan/similarity"),
-  );
-
-  request.files.add(
-    await http.MultipartFile.fromPath("current_image", currentImage.path),
-  );
-
-  for (final ref in referenceImages) {
-    request.files.add(
-      await http.MultipartFile.fromPath("reference_images", ref.path),
-    );
+  final currentB64 = base64Encode(await currentImageFile.readAsBytes());
+  final refB64List = <String>[];
+  for (final ref in referenceImageFiles) {
+    refB64List.add(base64Encode(await ref.readAsBytes()));
   }
 
-  final response = await request.send();
-  final body = await response.stream.bytesToString();
-  return json.decode(body);
+  final response = await http.post(
+    Uri.parse('http://<server-ip>:8000/seal-scan/similarity'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({
+      'current_image': currentB64,
+      'reference_images': refB64List,
+    }),
+  );
+
+  return jsonDecode(response.body);
 }
-```
-
-**Response handling:**
-```dart
-if (result["quality_passed"] == false) {
-  showRetakePrompt(result["failed_metrics"]);
-  return;
-}
-
-final assessment = result["tampering_assessment"];
-final riskClass = assessment["risk_class"];   // "LOW" | "MEDIUM" | "HIGH"
-final score = assessment["tampering_score"];  // 0.0 - 1.0
-
-showRiskBadge(riskClass, score);
-// IMPORTANT: Always show the disclaimer:
-// "AI-Assisted Tampering Risk Assessment. Officer determination is authoritative."
 ```
 
 ---
@@ -436,153 +412,25 @@ showRiskBadge(riskClass, score);
 ### Quality Check
 
 ```bash
-curl -X POST http://localhost:8000/quality-check \
-  -F "image=@/path/to/seal.jpg"
+curl -X POST "http://localhost:8000/quality-check" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "image": "<base64_string>"
+  }'
 ```
 
-### Similarity + Tampering Assessment (single reference)
+### Similarity Assessment
 
 ```bash
-curl -X POST http://localhost:8000/seal-scan/similarity \
-  -F "current_image=@/path/to/current.jpg" \
-  -F "reference_images=@/path/to/reference1.jpg"
-```
-
-### Similarity + Tampering Assessment (multiple references)
-
-```bash
-curl -X POST http://localhost:8000/seal-scan/similarity \
-  -F "current_image=@/path/to/current.jpg" \
-  -F "reference_images=@/path/to/reference1.jpg" \
-  -F "reference_images=@/path/to/reference2.jpg" \
-  -F "reference_images=@/path/to/reference3.jpg"
-```
-
----
-
-## Example JSON Responses
-
-### Quality Check — All Passing
-
-```json
-{
-  "success": true,
-  "quality_passed": true,
-  "message": "Image quality is satisfactory.",
-  "metrics": {
-    "resolution": { "width": 1920, "height": 1080, "passed": true },
-    "sharpness":  { "metric": "sharpness",  "value": 312.4, "threshold": 80.0,  "passed": true },
-    "brightness": { "metric": "brightness", "value": 130.1, "threshold": 225.0, "passed": true },
-    "contrast":   { "metric": "contrast",   "value": 62.3,  "threshold": 20.0,  "passed": true },
-    "noise":      { "metric": "noise",      "value": 4.2,   "threshold": 15.0,  "passed": true }
-  }
-}
-```
-
-### Quality Check — Blurry Image
-
-```json
-{
-  "success": false,
-  "quality_passed": false,
-  "message": "Image quality is not satisfactory. Please retake the image.",
-  "failed_metrics": [
-    {
-      "metric": "sharpness",
-      "value": 38.5,
-      "threshold": 80.0,
-      "passed": false,
-      "message": "Image is too blurry. Please retake with a steadier hand."
-    }
-  ]
-}
-```
-
-### Similarity — LOW Risk
-
-```json
-{
-  "success": true,
-  "quality_passed": true,
-  "message": "Image quality satisfactory. Similarity analysis completed. Tampering risk assessment: LOW. This is an AI-assisted assessment; the inspecting officer''s determination is authoritative.",
-  "tampering_assessment": {
-    "tampering_score": 0.09,
-    "risk_class": "LOW"
-  },
-  "aggregated_metrics": {
-    "cosine_similarity": 0.978,
-    "orb_match_ratio": 0.843,
-    "ssim_score": 0.961,
-    "edge_difference": 0.023,
-    "histogram_difference": 0.041,
-    "shape_difference": 0.011
-  },
-  "reference_comparisons": [
-    {
-      "reference_id": "reference_1",
-      "cosine_similarity": 0.978,
-      "orb_match_ratio": 0.843,
-      "ssim_score": 0.961,
-      "edge_difference": 0.023,
-      "histogram_difference": 0.041,
-      "shape_difference": 0.011
-    }
-  ]
-}
-```
-
-### Similarity — HIGH Risk
-
-```json
-{
-  "success": true,
-  "quality_passed": true,
-  "message": "Image quality satisfactory. Similarity analysis completed. Tampering risk assessment: HIGH. This is an AI-assisted assessment; the inspecting officer''s determination is authoritative.",
-  "tampering_assessment": {
-    "tampering_score": 0.89,
-    "risk_class": "HIGH"
-  },
-  "aggregated_metrics": {
-    "cosine_similarity": 0.21,
-    "orb_match_ratio": 0.08,
-    "ssim_score": 0.14,
-    "edge_difference": 0.72,
-    "histogram_difference": 0.81,
-    "shape_difference": 0.68
-  },
-  "reference_comparisons": [
-    {
-      "reference_id": "reference_1",
-      "cosine_similarity": 0.31,
-      "orb_match_ratio": 0.12,
-      "ssim_score": 0.22,
-      "edge_difference": 0.61,
-      "histogram_difference": 0.70,
-      "shape_difference": 0.55
-    },
-    {
-      "reference_id": "reference_2",
-      "cosine_similarity": 0.21,
-      "orb_match_ratio": 0.08,
-      "ssim_score": 0.14,
-      "edge_difference": 0.72,
-      "histogram_difference": 0.81,
-      "shape_difference": 0.68
-    }
-  ]
-}
-```
-
-### Error — Invalid File Type
-
-```json
-{
-  "success": false,
-  "error": {
-    "code": "INVALID_FILE_TYPE",
-    "message": "Unsupported file type '.pdf'. Allowed types: .jpg, .jpeg, .png, .bmp, .tif, .tiff, .webp"
-  }
-}
+curl -X POST "http://localhost:8000/seal-scan/similarity" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "current_image": "<base64_string_current>",
+    "reference_images": [
+      "<base64_string_ref_1>",
+      "<base64_string_ref_2>"
+    ]
+  }'
 ```
 
 ---
@@ -591,32 +439,35 @@ curl -X POST http://localhost:8000/seal-scan/similarity \
 
 ```
 backend/
- app/
-   config/
-     settings.py          # All tunable thresholds and parameters
-   api/
-     quality.py           # POST /quality-check route
-     similarity.py        # POST /seal-scan/similarity route
-   services/
-     image_quality.py     # Quality metrics evaluation
-     preprocessing.py     # Image preprocessing pipeline
-     feature_extraction.py # Six similarity metrics
-     similarity_engine.py # Orchestrates preprocessing + extraction
-     reference_aggregation.py # best_match / mean / median strategies
-     tampering_classifier.py  # Model loader + heuristic fallback
-   models/
-     schemas.py           # Pydantic request/response models
-   utils/
-     image_utils.py       # File validation, decode, colour conversions
-   main.py                # FastAPI app, middleware, startup warmup
- model/
-   generate_demo_model.py # Script to produce tampering_classifier.pkl
-   tampering_classifier.pkl  # (generated) trained sklearn model
- tests/
-   test_quality.py        # Quality service unit tests
-   test_similarity.py     # Feature / aggregation / classifier unit tests
-   test_api.py            # FastAPI integration tests
- requirements.txt
- .env.example
- README.md
+ ├── app/
+ │    ├── config/
+ │    │    └── settings.py              # Centralised thresholds and paths
+ │    ├── api/
+ │    │    ├── quality.py               # POST /quality-check route
+ │    │    └── similarity.py            # POST /seal-scan/similarity route
+ │    ├── services/
+ │    │    ├── image_quality.py         # Quality checks engine
+ │    │    ├── blur_classifier.py       # ML Blur Classifier service
+ │    │    ├── preprocessing.py         # 512x512, Denoise, HSV, Canny edges
+ │    │    ├── feature_extraction.py    # Pairwise similarity metrics
+ │    │    ├── similarity_engine.py     # Orchestration of comparisons
+ │    │    ├── reference_aggregation.py # best_match / mean / median
+ │    │    └── tampering_classifier.py  # ML tampering risk prediction
+ │    ├── models/
+ │    │    └── schemas.py               # Pydantic JSON request/response models
+ │    ├── utils/
+ │    │    └── image_utils.py           # Base64 decode, data-URI sanitisation
+ │    └── main.py                       # FastAPI application & startup warmup
+ ├── model/
+ │    ├── blur_classifier.pkl           # Pretrained ML blur classifier
+ │    ├── blur_classifier_metadata.json # Blur model specification & metadata
+ │    ├── tampering_classifier.pkl      # Pretrained ML tampering classifier
+ │    └── generate_demo_model.py        # Demo tampering model generator
+ ├── tests/
+ │    ├── test_quality.py               # Quality unit tests
+ │    ├── test_similarity.py            # Feature extraction & ML tests
+ │    └── test_api.py                   # FastAPI integration tests
+ ├── requirements.txt
+ ├── workflow.md                        # Architecture & schema documentation
+ └── README.md
 ```

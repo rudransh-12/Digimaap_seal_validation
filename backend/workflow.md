@@ -1,4 +1,4 @@
-﻿# SealScan Backend — Architecture, Schema & Workflow
+# SealScan Backend — Architecture, Schema & Workflow
 
 > **AI-Assisted Legal Metrology Seal Verification System**
 > All outputs are decision-support only. The inspecting officer's determination is authoritative.
@@ -13,11 +13,11 @@
 │                                                                             │
 │   POST /quality-check              POST /seal-scan/similarity               │
 │   ┌──────────────────┐             ┌─────────────────────────────────────┐  │
-│   │   image (file)   │             │   current_image (file)              │  │
-│   └──────────────────┘             │   reference_images[] (files)        │  │
+│   │ { image: b64 }   │             │ { current_image: b64,               │  │
+│   └──────────────────┘             │   reference_images: [b64, ...] }    │  │
 │                                    └─────────────────────────────────────┘  │
 └────────────────────┬───────────────────────────┬────────────────────────────┘
-                     │  multipart/form-data       │  multipart/form-data
+                     │  Content-Type: application/json
                      ▼                            ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                         FastAPI Application  (:8000)                        │
@@ -34,29 +34,31 @@
 │  │  ┌───────────────────┐   ┌─────────────────┐   ┌─────────────────┐  │   │
 │  │  │  image_quality.py │   │ preprocessing.py│   │feature_extract..│  │   │
 │  │  │  - Resolution     │   │ - Resize 512x512│   │ - Cosine Sim    │  │   │
-│  │  │  - Sharpness      │   │ - Gaussian blur │   │ - ORB + RANSAC  │  │   │
-│  │  │  - Brightness     │   │ - Grayscale     │   │ - SSIM          │  │   │
-│  │  │  - Contrast       │   │ - HSV           │   │ - Edge Diff     │  │   │
-│  │  │  - Noise          │   │ - Norm float    │   │ - Hist Diff     │  │   │
-│  │  └───────────────────┘   │ - Canny edges   │   │ - Shape (Hu)    │  │   │
-│  │                          └─────────────────┘   └─────────────────┘  │   │
-│  │                                                                      │   │
-│  │  ┌─────────────────────────┐   ┌─────────────────────────────────┐  │   │
-│  │  │ reference_aggregation.py│   │   tampering_classifier.py       │  │   │
-│  │  │ - best_match (default)  │   │   - Load .pkl once at startup   │  │   │
-│  │  │ - mean                  │   │   - Heuristic fallback if no .pk │  │   │
-│  │  │ - median                │   │   - Outputs score + risk class  │  │   │
-│  │  └─────────────────────────┘   └─────────────────────────────────┘  │   │
+│  │  │  - Laplacian Var  │   │ - Gaussian blur │   │ - ORB + RANSAC  │  │   │
+│  │  │  - Brenner Focus  │   │ - Grayscale     │   │ - SSIM          │  │   │
+│  │  │  - Canny Density  │   │ - HSV           │   │ - Edge Diff     │  │   │
+│  │  │  - AI Blur Clf    │   │ - Norm float    │   │ - Hist Diff     │  │   │
+│  │  │  - Brightness     │   │ - Canny edges   │   │ - Shape (Hu)    │  │   │
+│  │  │  - Contrast       │   └─────────────────┘   └─────────────────┘  │   │
+│  │  │  - Noise          │                                               │   │
+│  │  └─────────┬─────────┘   ┌─────────────────┐   ┌─────────────────┐  │   │
+│  │            │             │ reference_      │   │   tampering_    │  │   │
+│  │            ▼             │ aggregation.py  │   │   classifier.py │  │   │
+│  │  ┌───────────────────┐   │ - best_match    │   │   - Load .pkl   │  │   │
+│  │  │ blur_classifier.py│   │ - mean          │   │   - Heuristic   │  │   │
+│  │  │ (RandomForest ML) │   │ - median        │   │   - Risk score  │  │   │
+│  │  └───────────────────┘   └─────────────────┘   └─────────────────┘  │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                             │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
 │  │  config/settings.py — All thresholds, paths, and parameters here   │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-                 model/tampering_classifier.pkl
-                 (loaded once at startup, never reloaded)
+                               │
+            ┌──────────────────┴──────────────────┐
+            ▼                                     ▼
+model/blur_classifier.pkl             model/tampering_classifier.pkl
+(ML Blur gate; loaded at startup)     (Tampering classifier; loaded at startup)
 ```
 
 ### Module Responsibilities
@@ -64,25 +66,50 @@
 | Module | Responsibility |
 |---|---|
 | `app/main.py` | FastAPI app, CORS, request timing middleware, lifespan startup warmup |
-| `app/config/settings.py` | **Single source of truth** for all thresholds and parameters |
-| `app/api/quality.py` | Thin route for `POST /quality-check` |
-| `app/api/similarity.py` | Thin route for `POST /seal-scan/similarity` |
-| `app/services/image_quality.py` | Evaluates image against quality thresholds; used by **both** endpoints |
+| `app/config/settings.py` | **Single source of truth** for all thresholds, paths, and hyperparameters |
+| `app/api/quality.py` | Thin route for `POST /quality-check` (accepts Base64 JSON) |
+| `app/api/similarity.py` | Thin route for `POST /seal-scan/similarity` (accepts Base64 JSON) |
+| `app/services/image_quality.py` | Evaluates image against quality thresholds & ML blur model; used by **both** endpoints |
+| `app/services/blur_classifier.py` | 7-feature extraction & pretrained Random Forest inference for blur assessment |
 | `app/services/preprocessing.py` | Resize, denoise, grayscale, HSV, edge map; produces `PreprocessedImage` |
 | `app/services/feature_extraction.py` | Computes the 6 similarity metrics for one image pair |
 | `app/services/similarity_engine.py` | Orchestrates preprocessing + extraction over all reference images |
 | `app/services/reference_aggregation.py` | Aggregates per-reference results (best_match / mean / median) |
 | `app/services/tampering_classifier.py` | Loads `.pkl`, falls back to heuristic, outputs score + risk class |
 | `app/models/schemas.py` | All Pydantic request/response models |
-| `app/utils/image_utils.py` | File validation (type, size, decode), colour conversions |
-| `model/tampering_classifier.pkl` | Pre-trained sklearn RandomForest; loaded once at startup |
-| `model/generate_demo_model.py` | One-time script to produce the demo `.pkl` from synthetic data |
+| `app/utils/image_utils.py` | Base64 decode, data-URI sanitisation, image validation, colour conversions |
+| `model/blur_classifier.pkl` | Pretrained RandomForestClassifier for defocus / motion blur detection |
+| `model/blur_classifier_metadata.json` | Model metadata, feature definitions, and performance specs |
+| `model/tampering_classifier.pkl` | Pretrained RandomForestClassifier for seal tampering risk prediction |
+| `model/generate_demo_model.py` | One-time script to produce demo tampering `.pkl` from synthetic data |
 
 ---
 
 ## 2. Data Schemas
 
-### 2A. Quality Metric (used in both endpoints)
+### 2A. Request Payloads (Base64 JSON)
+
+#### POST /quality-check
+```json
+{
+  "image": "<base64 string or data:image/...;base64,...>"
+}
+```
+
+#### POST /seal-scan/similarity
+```json
+{
+  "current_image": "<base64 string>",
+  "reference_images": [
+    "<base64 string 1>",
+    "<base64 string 2>"
+  ]
+}
+```
+
+---
+
+### 2B. Quality Metric Detail
 
 ```json
 {
@@ -96,15 +123,15 @@
 
 | Field | Type | Description |
 |---|---|---|
-| `metric` | string | Metric name (sharpness / brightness / contrast / noise / resolution) |
+| `metric` | string | Metric identifier (`sharpness`, `brenner_sharpness`, `canny_edge_density`, `blur_classifier`, `brightness`, `contrast`, `noise`, `resolution`) |
 | `value` | float | Measured value |
-| `threshold` | float \| null | Acceptance threshold |
-| `passed` | bool | True if metric is within acceptable range |
-| `message` | string \| null | Human-readable explanation when failed |
+| `threshold` | float \| null | Threshold value configured in settings |
+| `passed` | bool | True if metric satisfies threshold |
+| `message` | string \| null | Human-readable explanation / retake prompt when failed |
 
 ---
 
-### 2B. Resolution Detail
+### 2C. Resolution Detail
 
 ```json
 {
@@ -116,21 +143,24 @@
 
 ---
 
-### 2C. All Metrics (quality-check success)
+### 2D. All Metrics Object (`AllMetrics`)
 
 ```json
 {
-  "resolution": { "width": 1920, "height": 1080, "passed": true },
-  "sharpness":  { "metric": "sharpness",  "value": 245.62, "threshold": 80.0,  "passed": true },
-  "brightness": { "metric": "brightness", "value": 128.4,  "threshold": 225.0, "passed": true },
-  "contrast":   { "metric": "contrast",   "value": 57.2,   "threshold": 20.0,  "passed": true },
-  "noise":      { "metric": "noise",      "value": 3.1,    "threshold": 15.0,  "passed": true }
+  "resolution":        { "width": 1920, "height": 1080, "passed": true },
+  "sharpness":         { "metric": "sharpness",          "value": 245.62, "threshold": 80.0,   "passed": true, "message": null },
+  "brenner_sharpness": { "metric": "brenner_sharpness",  "value": 412.50, "threshold": 100.0,  "passed": true, "message": null },
+  "canny_edge_density":{ "metric": "canny_edge_density", "value": 0.0452, "threshold": 0.008,  "passed": true, "message": null },
+  "blur_classifier":   { "metric": "blur_classifier",   "value": 0.9820, "threshold": 0.50,   "passed": true, "message": null },
+  "brightness":        { "metric": "brightness",        "value": 128.40, "threshold": 225.0,  "passed": true, "message": null },
+  "contrast":          { "metric": "contrast",          "value": 57.20,  "threshold": 25.0,   "passed": true, "message": null },
+  "noise":             { "metric": "noise",             "value": 3.10,   "threshold": 15.0,   "passed": true, "message": null }
 }
 ```
 
 ---
 
-### 2D. Per-Reference Comparison
+### 2E. Per-Reference Comparison
 
 ```json
 {
@@ -144,18 +174,18 @@
 }
 ```
 
-| Metric | Range | Better When |
-|---|---|---|
-| `cosine_similarity` | [0, 1] | Higher |
-| `orb_match_ratio` | [0, 1] | Higher |
-| `ssim_score` | [0, 1] | Higher |
-| `edge_difference` | [0, 1] | Lower |
-| `histogram_difference` | [0, 1] | Lower |
-| `shape_difference` | [0, 1] | Lower |
+| Metric | Range | Better When | Description |
+|---|---|---|---|
+| `cosine_similarity` | [0, 1] | Higher | Normalised greyscale dot product similarity |
+| `orb_match_ratio` | [0, 1] | Higher | Geometric RANSAC-filtered ORB keypoint match ratio |
+| `ssim_score` | [0, 1] | Higher | Structural Similarity Index (luminance, contrast, structure) |
+| `edge_difference` | [0, 1] | Lower | Mean absolute difference of Canny edge maps |
+| `histogram_difference` | [0, 1] | Lower | Bhattacharyya distance of HSV colour histograms |
+| `shape_difference` | [0, 1] | Lower | Log-Hu-moments distance |
 
 ---
 
-### 2E. Tampering Assessment
+### 2F. Tampering Assessment
 
 ```json
 {
@@ -166,34 +196,33 @@
 
 | Field | Type | Description |
 |---|---|---|
-| `tampering_score` | float [0,1] | Higher = higher tampering risk |
-| `risk_class` | LOW \| MEDIUM \| HIGH | Risk classification |
-
-> ⚠️ `tampering_score` is **not a calibrated probability** unless the deployed model has been explicitly calibrated with `CalibratedClassifierCV`.
+| `tampering_score` | float [0, 1] | Higher = higher tampering risk |
+| `risk_class` | LOW \| MEDIUM \| HIGH | Risk categorization for decision support |
 
 ---
 
-### 2F. POST /quality-check — Success Response
+### 2G. POST /quality-check — Responses
 
+#### Success Response (200 OK)
 ```json
 {
   "success": true,
   "quality_passed": true,
   "message": "Image quality is satisfactory.",
   "metrics": {
-    "resolution": { "width": 1920, "height": 1080, "passed": true },
-    "sharpness":  { "metric": "sharpness",  "value": 245.62, "threshold": 80.0,  "passed": true },
-    "brightness": { "metric": "brightness", "value": 128.4,  "threshold": 225.0, "passed": true },
-    "contrast":   { "metric": "contrast",   "value": 57.2,   "threshold": 20.0,  "passed": true },
-    "noise":      { "metric": "noise",      "value": 3.1,    "threshold": 15.0,  "passed": true }
+    "resolution":        { "width": 1920, "height": 1080, "passed": true },
+    "sharpness":         { "metric": "sharpness",         "value": 245.62, "threshold": 80.0,   "passed": true, "message": null },
+    "brenner_sharpness": { "metric": "brenner_sharpness", "value": 412.50, "threshold": 100.0,  "passed": true, "message": null },
+    "canny_edge_density":{ "metric": "canny_edge_density","value": 0.0452, "threshold": 0.008,  "passed": true, "message": null },
+    "blur_classifier":   { "metric": "blur_classifier",  "value": 0.9820, "threshold": 0.50,   "passed": true, "message": null },
+    "brightness":        { "metric": "brightness",       "value": 128.40, "threshold": 225.0,  "passed": true, "message": null },
+    "contrast":          { "metric": "contrast",         "value": 57.20,  "threshold": 25.0,   "passed": true, "message": null },
+    "noise":             { "metric": "noise",            "value": 3.10,   "threshold": 15.0,   "passed": true, "message": null }
   }
 }
 ```
 
----
-
-### 2G. POST /quality-check — Failure Response
-
+#### Quality Failure Response (200 OK)
 ```json
 {
   "success": false,
@@ -208,11 +237,11 @@
       "message": "Image is too blurry. Please retake with a steadier hand."
     },
     {
-      "metric": "brightness",
-      "value": 238.4,
-      "threshold": 220.0,
+      "metric": "blur_classifier",
+      "value": 0.1240,
+      "threshold": 0.50,
       "passed": false,
-      "message": "Image is overexposed. Reduce light source or adjust camera."
+      "message": "Image failed AI blur assessment. Please ensure camera is focused and steady."
     }
   ]
 }
@@ -220,8 +249,9 @@
 
 ---
 
-### 2H. POST /seal-scan/similarity — Success Response
+### 2H. POST /seal-scan/similarity — Responses
 
+#### Success Response (200 OK)
 ```json
 {
   "success": true,
@@ -248,24 +278,12 @@
       "edge_difference":      0.04,
       "histogram_difference": 0.06,
       "shape_difference":     0.02
-    },
-    {
-      "reference_id":         "reference_2",
-      "cosine_similarity":    0.88,
-      "orb_match_ratio":      0.70,
-      "ssim_score":           0.87,
-      "edge_difference":      0.09,
-      "histogram_difference": 0.11,
-      "shape_difference":     0.05
     }
   ]
 }
 ```
 
----
-
-### 2I. POST /seal-scan/similarity — Quality Failure Response
-
+#### Quality Fail Response (200 OK)
 ```json
 {
   "success": false,
@@ -283,30 +301,19 @@
 }
 ```
 
-> No similarity metrics or tampering assessment are returned when quality fails.
-
 ---
 
-### 2J. Error Response (any endpoint)
+### 2I. Error Envelope (4xx / 5xx)
 
 ```json
 {
   "success": false,
   "error": {
-    "code": "INVALID_FILE_TYPE",
-    "message": "Unsupported file type '.pdf'. Allowed types: .jpg, .jpeg, .png, .bmp, .tif, .tiff, .webp"
+    "code": "INVALID_IMAGE",
+    "message": "The provided base64 data could not be decoded as a valid image."
   }
 }
 ```
-
-| Error Code | HTTP | Trigger |
-|---|---|---|
-| `INVALID_FILE_TYPE` | 422 | Unsupported file extension |
-| `EMPTY_FILE` | 422 | Zero-byte upload |
-| `FILE_TOO_LARGE` | 413 | File > 20 MB |
-| `INVALID_IMAGE` | 422 | Cannot be decoded as image |
-| `MISSING_REFERENCE_IMAGES` | 422 | No reference images provided |
-| `INTERNAL_ERROR` | 500 | Unexpected server error |
 
 ---
 
@@ -315,277 +322,130 @@
 ### Workflow A — POST /quality-check
 
 ```
-Flutter Client
+Flutter Client (JSON Payload)
       │
-      │  POST /quality-check
-      │  multipart/form-data
-      │  ┌─────────────┐
-      │  │  image file │
-      │  └─────────────┘
+      │  POST /quality-check  { "image": "<base64>" }
       │
       ▼
-┌─────────────────────────────┐
-│  1. File Validation         │
-│     - extension check       │
-│     - size check (≤ 20 MB)  │
-│     - empty file check      │
-└────────────┬────────────────┘
-             │ FAIL → 422 Error (INVALID_FILE_TYPE / EMPTY_FILE / FILE_TOO_LARGE)
-             │
-             ▼
-┌─────────────────────────────┐
-│  2. Image Decode            │
-│     cv2.imdecode → BGR array│
-└────────────┬────────────────┘
-             │ FAIL → 422 Error (INVALID_IMAGE)
-             │
-             ▼
-┌───────────────────────────────────────────────────────┐
-│  3. Image Quality Service  (image_quality.py)         │
-│                                                       │
-│  ┌──────────────────┐   ┌───────────────────────┐    │
-│  │  Resolution      │   │  width ≥ 320 px        │    │
-│  │  (pixel dims)    │   │  height ≥ 320 px       │    │
-│  └──────────────────┘   └───────────────────────┘    │
-│                                                       │
-│  ┌──────────────────┐   ┌───────────────────────┐    │
-│  │  Sharpness       │   │  Laplacian variance    │    │
-│  │                  │   │  ≥ 80.0               │    │
-│  └──────────────────┘   └───────────────────────┘    │
-│                                                       │
-│  ┌──────────────────┐   ┌───────────────────────┐    │
-│  │  Brightness      │   │  mean pixel            │    │
-│  │                  │   │  30.0 ≤ val ≤ 225.0   │    │
-│  └──────────────────┘   └───────────────────────┘    │
-│                                                       │
-│  ┌──────────────────┐   ┌───────────────────────┐    │
-│  │  Contrast        │   │  std-dev pixels        │    │
-│  │                  │   │  ≥ 20.0               │    │
-│  └──────────────────┘   └───────────────────────┘    │
-│                                                       │
-│  ┌──────────────────┐   ┌───────────────────────┐    │
-│  │  Noise           │   │  Gaussian residual     │    │
-│  │                  │   │  std-dev ≤ 15.0        │    │
-│  └──────────────────┘   └───────────────────────┘    │
-│                                                       │
-│  ALL failures collected before returning              │
-└────────┬──────────────────────────────┬───────────────┘
-         │ FAIL                         │ PASS
-         ▼                              ▼
-┌──────────────────────┐    ┌────────────────────────────────┐
-│  200 Response        │    │  200 Response                  │
-│  quality_passed=false│    │  quality_passed=true           │
-│  failed_metrics=[...]│    │  metrics={ resolution,         │
-│                      │    │    sharpness, brightness,      │
-│  Flutter shows       │    │    contrast, noise }           │
-│  specific error msg  │    │                                │
-│  to officer          │    │  Flutter proceeds with         │
-└──────────────────────┘    │  inspection                    │
-                            └────────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│  1. Base64 Decode & Validation                         │
+│     - strip data-URI prefix if present                 │
+│     - decode base64 bytes                              │
+│     - size check (≤ 20 MB) & cv2.imdecode BGR check    │
+└───────────┬────────────────────────────────────────────┘
+            │ FAIL → 422 Error (EMPTY_FILE / FILE_TOO_LARGE / INVALID_IMAGE)
+            │
+            ▼
+┌────────────────────────────────────────────────────────┐
+│  2. Image Quality Service  (image_quality.py)          │
+│                                                        │
+│  • Resolution: width ≥ 320 px, height ≥ 320 px         │
+│  • Sharpness: Laplacian variance ≥ 80.0                │
+│  • Brenner Sharpness: horizontal 2nd diff ≥ 100.0      │
+│  • Canny Edge Density: edge ratio ≥ 0.008              │
+│  • AI Blur Classifier: P(NOT_BLURRY) ≥ 0.50            │
+│  • Brightness: mean pixel in [30.0, 225.0]             │
+│  • Contrast: std-dev pixel in ≥ 25.0                   │
+│  • Noise: Gaussian residual std ≤ 15.0                 │
+│                                                        │
+│  All 8 checks evaluated & all failures collected       │
+└───────────┬────────────────────────────┬───────────────┘
+            │ FAIL                       │ PASS
+            ▼                            ▼
+┌───────────────────────┐    ┌───────────────────────────┐
+│ 200 Response          │    │ 200 Response              │
+│ quality_passed=false  │    │ quality_passed=true       │
+│ failed_metrics=[...]  │    │ metrics={ AllMetrics }    │
+│                       │    │                           │
+│ Flutter prompts user  │    │ Flutter proceeds with     │
+│ to retake image       │    │ seal inspection           │
+└───────────────────────┘    └───────────────────────────┘
 ```
 
 ---
 
-### Workflow B — POST /seal-scan/similarity (Quality Fail Path)
+### Workflow B — POST /seal-scan/similarity
 
 ```
-Flutter Client
+Flutter Client (JSON Payload)
       │
       │  POST /seal-scan/similarity
-      │  ┌─────────────────────┐
-      │  │  current_image      │
-      │  │  reference_images[] │
-      │  └─────────────────────┘
+      │  { "current_image": "<b64>", "reference_images": ["<b64>", ...] }
       │
       ▼
-  File Validation (current + all reference files)
-      │ any FAIL → 422 Error
-      │
-      ▼
-  Image Quality Check on current_image only
-      │
-      │ FAIL
-      ▼
-┌──────────────────────────────────┐
-│  200 Response                    │
-│  success=false                   │
-│  quality_passed=false            │
-│  failed_metrics=[...]            │
-│                                  │
-│  ← No similarity metrics         │
-│  ← No tampering assessment       │
-│  ← No reference images processed │
-└──────────────────────────────────┘
-```
-
----
-
-### Workflow C — POST /seal-scan/similarity (Full Pipeline)
-
-```
-Flutter Client
-      │
-      │  POST /seal-scan/similarity
-      │  ┌──────────────────────────────┐
-      │  │  current_image               │
-      │  │  reference_images[]          │
-      │  │  (1 or more)                 │
-      │  └──────────────────────────────┘
-      │
-      ▼
-┌──────────────────────────┐
-│  1. File Validation      │
-│     - all uploads        │
-└────────────┬─────────────┘
-             │
-             ▼
-┌──────────────────────────────────────────┐
-│  2. Image Quality Check (current only)   │
-│     (same service used by /quality-check)│
-└────────────┬─────────────────────────────┘
-             │ PASS
-             ▼
-┌──────────────────────────────────────────────────────────────┐
-│  3. Preprocessing  (preprocessing.py → PreprocessedImage)    │
-│                                                              │
-│  Applied to CURRENT image once, then to each REFERENCE image │
-│                                                              │
-│  Step 1: Resize to 512×512 (INTER_AREA)                     │
-│  Step 2: Gaussian blur (kernel=3) for noise reduction        │
-│  Step 3: Convert to Grayscale                               │
-│  Step 4: Convert to HSV (colour histogram)                  │
-│  Step 5: Normalise grayscale to float [0,1] (cosine)        │
-│  Step 6: Canny edge map (Otsu auto-threshold)               │
-│                                                              │
-│  Output: PreprocessedImage { bgr, gray, hsv, edges, gray_n } │
-└────────────┬─────────────────────────────────────────────────┘
-             │
-             ▼
-┌──────────────────────────────────────────────────────────────┐
-│  4. Feature Extraction (feature_extraction.py)               │
-│                                                              │
-│  For each reference image:                                   │
-│                                                              │
-│  current ──┬──▶  A. cosine_similarity                       │
-│             │       vector dot product of gray_norm arrays   │
-│             │                                                │
-│             ├──▶  B. orb_match_ratio                        │
-│             │       ORB keypoints → BFMatcher → Lowe ratio  │
-│             │       → RANSAC homography → good/total         │
-│             │                                                │
-│             ├──▶  C. ssim_score                             │
-│             │       skimage SSIM on grayscale pair           │
-│             │                                                │
-│             ├──▶  D. edge_difference                        │
-│             │       mean |edges_cur - edges_ref| normalised  │
-│             │                                                │
-│             ├──▶  E. histogram_difference                   │
-│             │       HSV H+S histogram Bhattacharyya dist     │
-│             │                                                │
-│             └──▶  F. shape_difference                       │
-│                      log-Hu-moments L2 distance / 30         │
-│                                                              │
-│  Returns one metrics dict per reference                      │
-└────────────┬─────────────────────────────────────────────────┘
-             │
-             │  reference_1 → { cos, orb, ssim, edge, hist, shape }
-             │  reference_2 → { cos, orb, ssim, edge, hist, shape }
-             │  reference_N → { cos, orb, ssim, edge, hist, shape }
-             │
-             ▼
-┌──────────────────────────────────────────────────────────────┐
-│  5. Reference Aggregation  (reference_aggregation.py)        │
-│                                                              │
-│  Strategy (config: REFERENCE_AGGREGATION_METHOD)             │
-│                                                              │
-│  ┌─────────────┐  Select reference with best SSIM score      │
-│  │ best_match  │  (configurable via BEST_MATCH_METRIC)        │
-│  │ (default)   │  Use its metrics as the aggregated vector    │
-│  └─────────────┘                                             │
-│                                                              │
-│  ┌─────────────┐  Average each metric across all references  │
-│  │    mean     │                                             │
-│  └─────────────┘                                             │
-│                                                              │
-│  ┌─────────────┐  Median each metric across all references   │
-│  │   median    │                                             │
-│  └─────────────┘                                             │
-│                                                              │
-│  Output: aggregated_metrics { 6 scalar values }              │
-└────────────┬─────────────────────────────────────────────────┘
-             │
-             ▼
-┌──────────────────────────────────────────────────────────────┐
-│  6. Tampering Classifier  (tampering_classifier.py)          │
-│                                                              │
-│  Input feature vector (order from settings.py):             │
-│  [ cosine_similarity, orb_match_ratio, ssim_score,          │
-│    edge_difference, histogram_difference, shape_difference ] │
-│                                                              │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │  model/tampering_classifier.pkl  (loaded at startup) │   │
-│  │  sklearn RandomForestClassifier                       │   │
-│  │  predict_proba → score + class index                 │   │
-│  └────────────────────────────────────┬─────────────────┘   │
-│                                       │ if .pkl missing      │
-│  ┌────────────────────────────────────▼─────────────────┐   │
-│  │  Heuristic Fallback                                   │   │
-│  │  Weighted sum of metrics → normalised risk score      │   │
-│  │  score ≤ 0.35  → LOW                                 │   │
-│  │  score ≤ 0.70  → MEDIUM                              │   │
-│  │  score > 0.70  → HIGH                                │   │
-│  └───────────────────────────────────────────────────────┘   │
-│                                                              │
-│  Output: tampering_score (float [0,1])                       │
-│          risk_class (LOW | MEDIUM | HIGH)                    │
-└────────────┬─────────────────────────────────────────────────┘
-             │
-             ▼
-┌──────────────────────────────────────────────────────────────┐
-│  7. JSON Response                                            │
-│                                                              │
-│  {                                                           │
-│    "success": true,                                          │
-│    "quality_passed": true,                                   │
-│    "message": "...Tampering risk assessment: LOW...",        │
-│    "tampering_assessment": {                                 │
-│       "tampering_score": 0.12,                              │
-│       "risk_class": "LOW"                                   │
-│    },                                                        │
-│    "aggregated_metrics": { ...6 metrics... },               │
-│    "reference_comparisons": [ ...per-reference details... ] │
-│  }                                                           │
-└──────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│  1. Decode & Validate current_image + reference_images │
+└───────────┬────────────────────────────────────────────┘
+            │
+            ▼
+┌────────────────────────────────────────────────────────┐
+│  2. Image Quality Check (current_image only)           │
+└───────────┬────────────────────────────────────────────┘
+            │
+            ├─► FAIL ──► Return 200 { quality_passed: false, failed_metrics: [...] }
+            │            (Similarity pipeline skipped)
+            ▼ PASS
+┌────────────────────────────────────────────────────────┐
+│  3. Preprocessing (512×512, Denoise, HSV, Canny edges) │
+└───────────┬────────────────────────────────────────────┘
+            │
+            ▼
+┌────────────────────────────────────────────────────────┐
+│  4. Pairwise Feature Extraction                        │
+│     (Cosine, ORB+RANSAC, SSIM, EdgeDiff, HistDiff, Hu) │
+└───────────┬────────────────────────────────────────────┘
+            │
+            ▼
+┌────────────────────────────────────────────────────────┐
+│  5. Reference Aggregation                              │
+│     (best_match / mean / median)                       │
+└───────────┬────────────────────────────────────────────┘
+            │
+            ▼
+┌────────────────────────────────────────────────────────┐
+│  6. Tampering Classifier (Random Forest inference)     │
+│     Output: tampering_score [0,1], risk_class          │
+└───────────┬────────────────────────────────────────────┘
+            │
+            ▼
+┌────────────────────────────────────────────────────────┐
+│  7. JSON Response (Success + Tampering Assessment)     │
+└────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## 4. Quality Thresholds Reference
 
-All values are defined in `app/config/settings.py` under `QUALITY_THRESHOLDS`.
+All values are configured in `app/config/settings.py` under `QUALITY_THRESHOLDS`:
 
 | Metric | Method | Threshold | Pass Condition |
 |---|---|---|---|
 | Resolution | Pixel dimensions | min 320×320 | width ≥ 320 AND height ≥ 320 |
 | Sharpness | Laplacian variance | ≥ 80.0 | Higher = sharper |
-| Brightness | Mean greyscale pixel | 30.0 – 225.0 | Under/over-exposure both fail |
-| Contrast | Std-dev of greyscale | ≥ 20.0 | Low std = washed-out image |
+| Brenner Sharpness | 2nd-difference mean squared | ≥ 100.0 | Higher = sharper focus |
+| Canny Edge Density | Ratio of edge pixels | ≥ 0.008 | Sufficient structural details |
+| Blur Classifier | AI RandomForest model | ≥ 0.50 | Probability of NOT_BLURRY |
+| Brightness | Mean greyscale pixel | 30.0 – 225.0 | Reject underexposed / overexposed |
+| Contrast | Std-dev of greyscale pixels | ≥ 25.0 | Low std = washed-out / low dynamic range |
 | Noise | Gaussian blur residual std | ≤ 15.0 | High residual = noisy sensor |
 
 ---
 
-## 5. Similarity Metrics Reference
+## 5. Blur Classifier Details
 
-All six metrics are computed by `app/services/feature_extraction.py`.
-
-| Metric | Algorithm | Better When | Notes |
-|---|---|---|---|
-| `cosine_similarity` | Dot product of flattened normalised greyscale arrays | Higher | Fast global similarity |
-| `orb_match_ratio` | ORB + BFMatcher + Lowe ratio + RANSAC homography | Higher | Robust to rotation & scale |
-| `ssim_score` | Structural Similarity Index (luminance, contrast, structure) | Higher | Perceptual similarity |
-| `edge_difference` | Mean \|Canny(cur) − Canny(ref)\| normalised to [0,1] | Lower | Edge/outline comparison |
-| `histogram_difference` | Bhattacharyya on HSV H+S histograms | Lower | Colour distribution, illumination-robust |
-| `shape_difference` | L2 of log-Hu-moment vectors, normalised by 30 | Lower | Global shape/contour comparison |
+* **Model File:** `model/blur_classifier.pkl`
+* **Metadata File:** `model/blur_classifier_metadata.json`
+* **Model Type:** Scikit-learn `RandomForestClassifier` (150 trees, max depth 6)
+* **Target Classes:** `0: BLURRY`, `1: NOT_BLURRY`
+* **Extracted Features (7 in order):**
+  1. `laplacian_variance`
+  2. `edge_strength` (Sobel magnitude)
+  3. `noise` (Gaussian residual)
+  4. `brenner_sharpness` (horizontal second difference)
+  5. `canny_edge_density` (Canny 100, 200)
+  6. `fft_high_frequency_ratio` (2D FFT spectral energy)
+  7. `blur_effect` (`skimage.measure.blur_effect`)
 
 ---
 
@@ -608,10 +468,13 @@ API Layer  (api/quality.py, api/similarity.py)
      │  Thin routes: validate inputs, call services, return JSON
      ▼
 Validation  (utils/image_utils.py)
-     │  File type, size, decode checks
+     │  Base64 decoding, size checks, image decode checks
      ▼
 Image Quality Service  (services/image_quality.py)
      │  Used by BOTH endpoints; never skipped
+     ▼
+Blur Classifier  (services/blur_classifier.py)
+     │  AI blur verification gate loaded once at startup
      ▼
 Preprocessing  (services/preprocessing.py)
      │  Only reached after quality PASS in similarity endpoint

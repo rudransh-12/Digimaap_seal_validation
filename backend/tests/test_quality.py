@@ -106,6 +106,25 @@ class TestCannyEdgeDensity:
 
 
 # ---------------------------------------------------------------------------
+# Blur Classifier ML Model tests
+# ---------------------------------------------------------------------------
+class TestBlurClassifier:
+    def test_sharp_image_passes(self):
+        bgr = _make_sharp_bgr()
+        passed, metrics, failed = check_quality(bgr)
+        assert metrics.blur_classifier.passed is True
+        assert metrics.blur_classifier.value >= QUALITY_THRESHOLDS["min_blur_classifier_score"]
+
+    def test_blurry_image_fails(self):
+        bgr = _make_blurry_bgr()
+        passed, metrics, failed = check_quality(bgr)
+        assert metrics.blur_classifier.passed is False
+        failures = [m for m in failed if m.metric == "blur_classifier"]
+        assert len(failures) == 1
+        assert "AI blur" in failures[0].message
+
+
+# ---------------------------------------------------------------------------
 # Brightness tests
 # ---------------------------------------------------------------------------
 class TestBrightness:
