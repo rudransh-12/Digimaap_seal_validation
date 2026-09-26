@@ -90,7 +90,7 @@ SIFT_CONFIG: dict = {
 REFERENCE_AGGREGATION_METHOD: str = "best_match"
 
 # For "best_match": which metric to rank by?
-BEST_MATCH_METRIC: str = "ssim_score"
+BEST_MATCH_METRIC: str = "sift_match_ratio"
 
 # ---------------------------------------------------------------------------
 # Tampering Classifier
