@@ -1,4 +1,4 @@
-﻿"""
+"""
 SealScan -- Similarity Engine.
 
 Orchestrates preprocessing + feature extraction over the current image
@@ -46,7 +46,7 @@ class SimilarityEngine:
                 {
                     "reference_id": ref_id,
                     "cosine_similarity": metrics.cosine_similarity,
-                    "orb_match_ratio": metrics.orb_match_ratio,
+                    "sift_match_ratio": metrics.sift_match_ratio,
                     "ssim_score": metrics.ssim_score,
                     "edge_difference": metrics.edge_difference,
                     "histogram_difference": metrics.histogram_difference,

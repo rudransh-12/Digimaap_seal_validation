@@ -1,4 +1,4 @@
-﻿"""
+"""
 SealScan -- Tampering Classifier Service.
 
 Loads a pretrained sklearn-compatible model from disk once at startup and
@@ -31,7 +31,7 @@ RiskClass = Literal["LOW", "MEDIUM", "HIGH"]
 # represents tampering risk (0 = clearly intact, 1 = likely tampered).
 _HEURISTIC_WEIGHTS: dict[str, float] = {
     "cosine_similarity":   -0.25,   # negative: high similarity -> low risk
-    "orb_match_ratio":     -0.20,
+    "sift_match_ratio":     -0.20,
     "ssim_score":          -0.25,
     "edge_difference":      0.10,   # positive: high diff -> high risk
     "histogram_difference": 0.10,

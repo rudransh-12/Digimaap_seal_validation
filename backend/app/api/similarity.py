@@ -16,6 +16,7 @@ from app.services.similarity_engine import SimilarityEngine
 from app.services.reference_aggregation import aggregate
 from app.models.schemas import (
     SimilarityRequest,
+    SimilarityResponse,
     SimilaritySuccessResponse,
     SimilarityQualityFailResponse,
     TamperingAssessment,
@@ -54,6 +55,7 @@ def _get_classifier():
 
 @router.post(
     "/seal-scan/similarity",
+    response_model=SimilarityResponse,
     summary="Seal Similarity & Tampering Assessment",
     description=(
         "Upload a current seal image and one or more reference images. "

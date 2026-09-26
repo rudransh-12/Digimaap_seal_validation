@@ -1,4 +1,4 @@
-﻿"""
+"""
 SealScan -- Reference Image Aggregation Service.
 
 Aggregates per-reference similarity metrics into a single feature vector
@@ -23,7 +23,7 @@ from app.config.settings import (
 logger = logging.getLogger("sealscan.reference_aggregation")
 
 # Metrics where HIGHER = better similarity
-_HIGHER_IS_BETTER = {"cosine_similarity", "orb_match_ratio", "ssim_score"}
+_HIGHER_IS_BETTER = {"cosine_similarity", "sift_match_ratio", "ssim_score"}
 # Metrics where LOWER = better similarity
 _LOWER_IS_BETTER = {"edge_difference", "histogram_difference", "shape_difference"}
 

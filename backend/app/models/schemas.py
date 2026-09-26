@@ -2,7 +2,7 @@
 SealScan -- Pydantic request / response schemas.
 """
 from __future__ import annotations
-from typing import Optional
+from typing import Optional, Union
 from pydantic import BaseModel, Field
 
 
@@ -86,7 +86,7 @@ class QualityCheckResponse(BaseModel):
 class ReferenceComparison(BaseModel):
     reference_id: str
     cosine_similarity: float
-    orb_match_ratio: float
+    sift_match_ratio: float
     ssim_score: float
     edge_difference: float
     histogram_difference: float
@@ -98,7 +98,7 @@ class ReferenceComparison(BaseModel):
 # ---------------------------------------------------------------------------
 class AggregatedMetrics(BaseModel):
     cosine_similarity: float
-    orb_match_ratio: float
+    sift_match_ratio: float
     ssim_score: float
     edge_difference: float
     histogram_difference: float
@@ -144,3 +144,6 @@ class SimilarityQualityFailResponse(BaseModel):
 class SimilarityErrorResponse(BaseModel):
     success: bool = False
     error: ErrorBody
+
+
+SimilarityResponse = Union[SimilaritySuccessResponse, SimilarityQualityFailResponse]

@@ -86,11 +86,11 @@ class TestFeatureExtraction:
         assert metrics.ssim_score < 0.9
         assert metrics.edge_difference > 0.0
 
-    def test_orb_ratio_in_bounds(self):
+    def test_sift_ratio_in_bounds(self):
         img = _gradient_bgr()
         p = self._prep(img)
         metrics = _extractor.compute(p, p)
-        assert 0.0 <= metrics.orb_match_ratio <= 1.0
+        assert 0.0 <= metrics.sift_match_ratio <= 1.0
 
     def test_shape_difference_identical(self):
         img = _gradient_bgr()
@@ -115,7 +115,7 @@ class TestAggregation:
             {
                 "reference_id": "reference_1",
                 "cosine_similarity": 0.90,
-                "orb_match_ratio": 0.70,
+                "sift_match_ratio": 0.70,
                 "ssim_score": 0.85,
                 "edge_difference": 0.10,
                 "histogram_difference": 0.15,
@@ -124,7 +124,7 @@ class TestAggregation:
             {
                 "reference_id": "reference_2",
                 "cosine_similarity": 0.60,
-                "orb_match_ratio": 0.40,
+                "sift_match_ratio": 0.40,
                 "ssim_score": 0.55,
                 "edge_difference": 0.35,
                 "histogram_difference": 0.40,
@@ -170,7 +170,7 @@ class TestClassifier:
     def _low_risk_metrics(self) -> dict:
         return {
             "cosine_similarity": 0.97,
-            "orb_match_ratio": 0.85,
+            "sift_match_ratio": 0.85,
             "ssim_score": 0.96,
             "edge_difference": 0.02,
             "histogram_difference": 0.03,
@@ -180,7 +180,7 @@ class TestClassifier:
     def _high_risk_metrics(self) -> dict:
         return {
             "cosine_similarity": 0.10,
-            "orb_match_ratio": 0.05,
+            "sift_match_ratio": 0.05,
             "ssim_score": 0.08,
             "edge_difference": 0.90,
             "histogram_difference": 0.85,

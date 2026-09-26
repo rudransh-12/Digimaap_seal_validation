@@ -34,7 +34,7 @@
 │  │  ┌───────────────────┐   ┌─────────────────┐   ┌─────────────────┐  │   │
 │  │  │  image_quality.py │   │ preprocessing.py│   │feature_extract..│  │   │
 │  │  │  - Resolution     │   │ - Resize 512x512│   │ - Cosine Sim    │  │   │
-│  │  │  - Laplacian Var  │   │ - Gaussian blur │   │ - ORB + RANSAC  │  │   │
+│  │  │  - Laplacian Var  │   │ - Gaussian blur │   │ - SIFT + RANSAC │  │   │
 │  │  │  - Brenner Focus  │   │ - Grayscale     │   │ - SSIM          │  │   │
 │  │  │  - Canny Density  │   │ - HSV           │   │ - Edge Diff     │  │   │
 │  │  │  - AI Blur Clf    │   │ - Norm float    │   │ - Hist Diff     │  │   │
@@ -166,7 +166,7 @@ model/blur_classifier.pkl             model/tampering_classifier.pkl
 {
   "reference_id":        "reference_1",
   "cosine_similarity":   0.97,
-  "orb_match_ratio":     0.81,
+  "sift_match_ratio":    0.81,
   "ssim_score":          0.94,
   "edge_difference":     0.04,
   "histogram_difference":0.06,
@@ -177,7 +177,7 @@ model/blur_classifier.pkl             model/tampering_classifier.pkl
 | Metric | Range | Better When | Description |
 |---|---|---|---|
 | `cosine_similarity` | [0, 1] | Higher | Normalised greyscale dot product similarity |
-| `orb_match_ratio` | [0, 1] | Higher | Geometric RANSAC-filtered ORB keypoint match ratio |
+| `sift_match_ratio` | [0, 1] | Higher | Geometric RANSAC-filtered SIFT keypoint match ratio |
 | `ssim_score` | [0, 1] | Higher | Structural Similarity Index (luminance, contrast, structure) |
 | `edge_difference` | [0, 1] | Lower | Mean absolute difference of Canny edge maps |
 | `histogram_difference` | [0, 1] | Lower | Bhattacharyya distance of HSV colour histograms |
@@ -263,7 +263,7 @@ model/blur_classifier.pkl             model/tampering_classifier.pkl
   },
   "aggregated_metrics": {
     "cosine_similarity":    0.97,
-    "orb_match_ratio":      0.81,
+    "sift_match_ratio":     0.81,
     "ssim_score":           0.94,
     "edge_difference":      0.04,
     "histogram_difference": 0.06,
@@ -273,7 +273,7 @@ model/blur_classifier.pkl             model/tampering_classifier.pkl
     {
       "reference_id":         "reference_1",
       "cosine_similarity":    0.97,
-      "orb_match_ratio":      0.81,
+      "sift_match_ratio":     0.81,
       "ssim_score":           0.94,
       "edge_difference":      0.04,
       "histogram_difference": 0.06,
@@ -392,7 +392,7 @@ Flutter Client (JSON Payload)
             ▼
 ┌────────────────────────────────────────────────────────┐
 │  4. Pairwise Feature Extraction                        │
-│     (Cosine, ORB+RANSAC, SSIM, EdgeDiff, HistDiff, Hu) │
+│     (Cosine, SIFT+RANSAC, SSIM, EdgeDiff, HistDiff, Hu) │
 └───────────┬────────────────────────────────────────────┘
             │
             ▼

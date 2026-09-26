@@ -42,8 +42,8 @@ ALLOWED_EXTENSIONS: list[str] = [".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff
 # ---------------------------------------------------------------------------
 QUALITY_THRESHOLDS: dict = {
     # Resolution
-    "min_width": 0,
-    "min_height": 0,
+    "min_width": 300,
+    "min_height": 300,
     # Sharpness -- Laplacian variance (higher = sharper)
     "min_sharpness": 80.0,
     # Brenner sharpness -- mean squared difference with step 2 (higher = sharper)
@@ -70,12 +70,14 @@ PREPROCESSING: dict = {
 }
 
 # ---------------------------------------------------------------------------
-# ORB Feature Matching
+# SIFT Feature Matching
 # ---------------------------------------------------------------------------
-ORB_CONFIG: dict = {
-    "n_features": 1000,
-    "scale_factor": 1.2,
-    "n_levels": 8,
+SIFT_CONFIG: dict = {
+    "n_features": 0,                # 0 = unconstrained detection
+    "n_octave_layers": 3,
+    "contrast_threshold": 0.04,
+    "edge_threshold": 10.0,
+    "sigma": 1.6,
     "lowe_ratio": 0.75,
     "ransac_reproj_threshold": 5.0,
     "min_good_matches": 4,
@@ -95,7 +97,7 @@ BEST_MATCH_METRIC: str = "ssim_score"
 # ---------------------------------------------------------------------------
 CLASSIFIER_FEATURE_ORDER: list[str] = [
     "cosine_similarity",
-    "orb_match_ratio",
+    "sift_match_ratio",
     "ssim_score",
     "edge_difference",
     "histogram_difference",

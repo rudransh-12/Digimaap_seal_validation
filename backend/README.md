@@ -251,7 +251,7 @@ All tunable thresholds and paths are centralized in `app/config/settings.py`:
   },
   "aggregated_metrics": {
     "cosine_similarity":    0.97,
-    "orb_match_ratio":      0.81,
+    "sift_match_ratio":     0.81,
     "ssim_score":           0.94,
     "edge_difference":      0.04,
     "histogram_difference": 0.06,
@@ -261,7 +261,7 @@ All tunable thresholds and paths are centralized in `app/config/settings.py`:
     {
       "reference_id":         "reference_1",
       "cosine_similarity":    0.97,
-      "orb_match_ratio":      0.81,
+      "sift_match_ratio":     0.81,
       "ssim_score":           0.94,
       "edge_difference":      0.04,
       "histogram_difference": 0.06,
@@ -311,7 +311,7 @@ All tunable thresholds and paths are centralized in `app/config/settings.py`:
 | Metric | Range | Better When | Description |
 |---|---|---|---|
 | `cosine_similarity` | [0, 1] | Higher | Normalised greyscale dot product similarity |
-| `orb_match_ratio` | [0, 1] | Higher | Geometrically verified ORB keypoints (RANSAC homography) |
+| `sift_match_ratio` | [0, 1] | Higher | Geometrically verified SIFT keypoints (FLANN + Lowe's ratio + RANSAC homography) |
 | `ssim_score` | [0, 1] | Higher | Structural Similarity Index (luminance, contrast, structure) |
 | `edge_difference` | [0, 1] | Lower | Mean absolute difference of Otsu-Canny edge maps |
 | `histogram_difference` | [0, 1] | Lower | Bhattacharyya distance of normalised HSV colour histograms |

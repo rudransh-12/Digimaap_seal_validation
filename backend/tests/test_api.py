@@ -183,7 +183,7 @@ class TestSimilarityEndpoint:
         body = response.json()
         if body.get("success"):
             am = body["aggregated_metrics"]
-            for key in ["cosine_similarity", "orb_match_ratio", "ssim_score",
+            for key in ["cosine_similarity", "sift_match_ratio", "ssim_score",
                         "edge_difference", "histogram_difference", "shape_difference"]:
                 assert key in am
 

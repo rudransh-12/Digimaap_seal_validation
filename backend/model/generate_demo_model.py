@@ -1,4 +1,4 @@
-﻿"""
+"""
 SealScan -- Demo Model Generator
 Generates and saves a demo RandomForestClassifier trained on synthetic
 seal similarity data. Run this script once to produce tampering_classifier.pkl.
@@ -18,7 +18,7 @@ from sklearn.metrics import classification_report
 SCRIPT_DIR = Path(__file__).resolve().parent
 MODEL_PATH = SCRIPT_DIR / "tampering_classifier.pkl"
 
-# Feature order: [cosine, orb, ssim, edge, hist, shape]
+# Feature order: [cosine, sift, ssim, edge, hist, shape]
 # Risk: 0=LOW, 1=MEDIUM, 2=HIGH
 
 
@@ -29,27 +29,27 @@ def _generate_samples(n: int, risk: int, rng: np.random.Generator) -> np.ndarray
     """
     if risk == 0:   # LOW -- very similar images
         cosine = rng.uniform(0.85, 1.00, n)
-        orb    = rng.uniform(0.60, 1.00, n)
+        sift   = rng.uniform(0.60, 1.00, n)
         ssim   = rng.uniform(0.80, 1.00, n)
         edge   = rng.uniform(0.00, 0.10, n)
         hist   = rng.uniform(0.00, 0.10, n)
         shape  = rng.uniform(0.00, 0.08, n)
     elif risk == 1:  # MEDIUM -- some differences
         cosine = rng.uniform(0.50, 0.85, n)
-        orb    = rng.uniform(0.30, 0.65, n)
+        sift   = rng.uniform(0.30, 0.65, n)
         ssim   = rng.uniform(0.45, 0.82, n)
         edge   = rng.uniform(0.10, 0.35, n)
         hist   = rng.uniform(0.10, 0.40, n)
         shape  = rng.uniform(0.08, 0.35, n)
     else:            # HIGH -- very different / tampered
         cosine = rng.uniform(0.00, 0.55, n)
-        orb    = rng.uniform(0.00, 0.35, n)
+        sift   = rng.uniform(0.00, 0.35, n)
         ssim   = rng.uniform(0.00, 0.50, n)
         edge   = rng.uniform(0.35, 1.00, n)
         hist   = rng.uniform(0.40, 1.00, n)
         shape  = rng.uniform(0.35, 1.00, n)
 
-    return np.column_stack([cosine, orb, ssim, edge, hist, shape])
+    return np.column_stack([cosine, sift, ssim, edge, hist, shape])
 
 
 def main() -> None:

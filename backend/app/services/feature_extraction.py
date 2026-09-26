@@ -1,4 +1,4 @@
-﻿"""
+"""
 SealScan -- Feature Extraction Service.
 
 Computes the six similarity metrics between one pair of
@@ -13,7 +13,7 @@ import cv2
 import numpy as np
 from skimage.metrics import structural_similarity as ssim
 
-from app.config.settings import ORB_CONFIG
+from app.config.settings import SIFT_CONFIG
 from app.services.preprocessing import PreprocessedImage
 
 logger = logging.getLogger("sealscan.feature_extraction")
@@ -22,7 +22,7 @@ logger = logging.getLogger("sealscan.feature_extraction")
 @dataclass
 class SimilarityMetrics:
     cosine_similarity: float
-    orb_match_ratio: float
+    sift_match_ratio: float
     ssim_score: float
     edge_difference: float
     histogram_difference: float
@@ -33,13 +33,19 @@ class FeatureExtractor:
     """Computes all six similarity metrics between a pair of preprocessed images."""
 
     def __init__(self) -> None:
-        cfg = ORB_CONFIG
-        self._orb = cv2.ORB_create(
+        cfg = SIFT_CONFIG
+        self._sift = cv2.SIFT_create(
             nfeatures=cfg["n_features"],
-            scaleFactor=cfg["scale_factor"],
-            nlevels=cfg["n_levels"],
+            nOctaveLayers=cfg["n_octave_layers"],
+            contrastThreshold=cfg["contrast_threshold"],
+            edgeThreshold=cfg["edge_threshold"],
+            sigma=cfg["sigma"],
         )
-        self._bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
+        # FLANN matcher for floating-point SIFT descriptors (KD-Tree index)
+        FLANN_INDEX_KDTREE = 1
+        index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+        search_params = dict(checks=50)
+        self._matcher = cv2.FlannBasedMatcher(index_params, search_params)
         self._lowe = cfg["lowe_ratio"]
         self._ransac_thresh = cfg["ransac_reproj_threshold"]
         self._min_good = cfg["min_good_matches"]
@@ -49,7 +55,7 @@ class FeatureExtractor:
     # ------------------------------------------------------------------
     def compute(self, current: PreprocessedImage, reference: PreprocessedImage) -> SimilarityMetrics:
         cos_sim = self._cosine_similarity(current.gray_norm, reference.gray_norm)
-        orb_ratio = self._orb_match_ratio(current.gray, reference.gray)
+        sift_ratio = self._sift_match_ratio(current.gray, reference.gray)
         ssim_score = self._ssim_score(current.gray, reference.gray)
         edge_diff = self._edge_difference(current.edges, reference.edges)
         hist_diff = self._histogram_difference(current.hsv, reference.hsv)
@@ -57,7 +63,7 @@ class FeatureExtractor:
 
         metrics = SimilarityMetrics(
             cosine_similarity=round(cos_sim, 6),
-            orb_match_ratio=round(orb_ratio, 6),
+            sift_match_ratio=round(sift_ratio, 6),
             ssim_score=round(ssim_score, 6),
             edge_difference=round(edge_diff, 6),
             histogram_difference=round(hist_diff, 6),
@@ -80,17 +86,33 @@ class FeatureExtractor:
         return float(np.dot(flat_a, flat_b) / (norm_a * norm_b))
 
     # ------------------------------------------------------------------
-    # B. ORB Match Ratio
+    # B. SIFT Match Ratio
     # ------------------------------------------------------------------
-    def _orb_match_ratio(self, gray_cur: np.ndarray, gray_ref: np.ndarray) -> float:
-        kp_cur, des_cur = self._orb.detectAndCompute(gray_cur, None)
-        kp_ref, des_ref = self._orb.detectAndCompute(gray_ref, None)
+    def _sift_match_ratio(self, gray_cur: np.ndarray, gray_ref: np.ndarray) -> float:
+        kp_cur, des_cur = self._sift.detectAndCompute(gray_cur, None)
+        kp_ref, des_ref = self._sift.detectAndCompute(gray_ref, None)
 
-        if des_cur is None or des_ref is None or len(kp_cur) == 0 or len(kp_ref) == 0:
+        if (
+            des_cur is None
+            or des_ref is None
+            or len(kp_cur) < 2
+            or len(kp_ref) < 2
+        ):
             return 0.0
 
-        # Lowe''s ratio test (kNN k=2)
-        matches = self._bf.knnMatch(des_cur, des_ref, k=2)
+        # Ensure float32 format for FLANN KD-Tree matcher
+        if des_cur.dtype != np.float32:
+            des_cur = des_cur.astype(np.float32)
+        if des_ref.dtype != np.float32:
+            des_ref = des_ref.astype(np.float32)
+
+        # Lowe's ratio test (kNN k=2)
+        try:
+            matches = self._matcher.knnMatch(des_cur, des_ref, k=2)
+        except cv2.error as err:
+            logger.warning("FLANN matching error: %s. Returning 0.0", err)
+            return 0.0
+
         good: list[cv2.DMatch] = []
         for pair in matches:
             if len(pair) == 2:
@@ -100,13 +122,12 @@ class FeatureExtractor:
 
         # Optional RANSAC geometric verification
         if self._ransac_thresh > 0 and len(good) >= self._min_good:
-            pts_cur = np.float32([kp_cur[m.queryIdx].pt for m in good])
-            pts_ref = np.float32([kp_ref[m.trainIdx].pt for m in good])
+            pts_cur = np.float32([kp_cur[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
+            pts_ref = np.float32([kp_ref[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
             _, mask = cv2.findHomography(pts_cur, pts_ref, cv2.RANSAC, self._ransac_thresh)
             if mask is not None:
                 good = [g for g, m in zip(good, mask.ravel()) if m]
 
-        # Denominator: total relevant keypoints (max of both sets, capped at n_features)
         denom = max(len(kp_cur), len(kp_ref))
         return float(len(good)) / denom if denom > 0 else 0.0
 
