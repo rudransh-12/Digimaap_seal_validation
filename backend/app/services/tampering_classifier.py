@@ -29,15 +29,15 @@ RiskClass = Literal["LOW", "MEDIUM", "HIGH"]
 # Metric weights used by the FALLBACK heuristic only.
 # Higher-is-better metrics are inverted so the composite score
 # represents tampering risk (0 = clearly intact, 1 = likely tampered).
-# SIFT is given the dominant primary weight (-0.50 = 50% of the decision)
-# for robust rotation, scale, and perspective invariance.
+# SIFT is given 80% dominant weight (-0.80) for overwhelming authority
+# on rotation, scale, and perspective invariant matching.
 _HEURISTIC_WEIGHTS: dict[str, float] = {
-    "sift_match_ratio":     -0.50,   # primary invariant feature matcher (50%)
-    "cosine_similarity":   -0.10,   # auxiliary global intensity alignment (10%)
-    "ssim_score":          -0.15,   # auxiliary structural similarity (15%)
-    "edge_difference":      0.08,   # auxiliary edge map difference (8%)
-    "histogram_difference": 0.09,   # auxiliary color distribution difference (9%)
-    "shape_difference":     0.08,   # auxiliary contour moment difference (8%)
+    "sift_match_ratio":     -0.80,   # dominant invariant feature matcher (80%)
+    "cosine_similarity":   -0.03,   # auxiliary global intensity alignment (3%)
+    "ssim_score":          -0.05,   # auxiliary structural similarity (5%)
+    "edge_difference":      0.04,   # auxiliary edge map difference (4%)
+    "histogram_difference": 0.04,   # auxiliary color distribution difference (4%)
+    "shape_difference":     0.04,   # auxiliary contour moment difference (4%)
 }
 
 
@@ -139,8 +139,8 @@ class TamperingClassifier:
             val = float(metrics.get(metric, 0.0))
             raw_score += weight * val
 
-        # Shift to [0,1] range (raw_score in [-0.75, +0.25])
-        score = float(np.clip((raw_score + 0.75) / 1.00, 0.0, 1.0))
+        # Shift to [0,1] range (raw_score in [-0.88, +0.12])
+        score = float(np.clip((raw_score + 0.88) / 1.00, 0.0, 1.0))
 
         if score <= HEURISTIC_THRESHOLDS["LOW"]:
             risk_class: RiskClass = "LOW"
