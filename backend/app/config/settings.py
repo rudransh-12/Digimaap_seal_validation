@@ -42,8 +42,8 @@ ALLOWED_EXTENSIONS: list[str] = [".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff
 # ---------------------------------------------------------------------------
 QUALITY_THRESHOLDS: dict = {
     # Resolution
-    "min_width": 320,
-    "min_height": 320,
+    "min_width": 0,
+    "min_height": 0,
     # Sharpness -- Laplacian variance (higher = sharper)
     "min_sharpness": 80.0,
     # Brenner sharpness -- mean squared difference with step 2 (higher = sharper)
